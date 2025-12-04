@@ -14,6 +14,12 @@ import { OntologyModule } from './ontology/ontology.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      envFilePath:
+        process.env.NODE_ENV === 'dev'
+          ? '.env.dev'
+          : process.env.NODE_ENV === 'prod'
+          ? '.env.prod'
+          : '.env.test',
       load: [configuration],
       validate,
     }),

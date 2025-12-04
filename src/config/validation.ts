@@ -7,19 +7,19 @@ class EnvironmentVariables {
   PORT?: string;
 
   @IsString()
-  DB_HOST!: string;
+  POSTGRES_HOST!: string;
 
   @IsString()
-  DB_PORT!: string;
+  POSTGRES_PORT!: string;
 
   @IsString()
-  DB_USER!: string;
+  POSTGRES_USER!: string;
 
   @IsString()
-  DB_PASSWORD!: string;
+  POSTGRES_PASSWORD!: string;
 
   @IsString()
-  DB_NAME!: string;
+  POSTGRES_DB!: string;
 
   @IsString()
   JWT_SECRET!: string;

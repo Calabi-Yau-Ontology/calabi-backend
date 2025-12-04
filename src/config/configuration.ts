@@ -1,3 +1,5 @@
+import { use } from "passport";
+
 export default () => ({
   port: parseInt(process.env.PORT ?? '4000', 10),
   database: {
@@ -12,8 +14,9 @@ export default () => ({
     expiresIn: process.env.JWT_EXPIRES_IN ?? '1d',
   },
   neo4j: {
-    uri: process.env.NEO4J_URI ?? 'bolt://localhost:7687',
-    user: process.env.NEO4J_USER ?? 'neo4j',
-    password: process.env.NEO4J_PASSWORD ?? 'password',
+    uri: process.env.APP_NEO4J_URI ?? 'bolt://localhost:7687',
+    // auth: process.env.NEO4J_AUTH ?? 'neo4j/password',
+    user: process.env.NEO4J_AUTH?.split('/')[0] ?? 'neo4j',
+    password: process.env.NEO4J_AUTH?.split('/')[1] ?? 'password',
   },
 });

@@ -9,6 +9,7 @@ import { AuthModule } from './auth/auth.module';
 import { EventsModule } from './events/events.module';
 import { SuggestionsModule } from './suggestions/suggestions.module';
 import { OntologyModule } from './ontology/ontology.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { OntologyModule } from './ontology/ontology.module';
     EventsModule,
     SuggestionsModule,
     OntologyModule,
+    HealthModule,
   ],
 })
 export class AppModule {}

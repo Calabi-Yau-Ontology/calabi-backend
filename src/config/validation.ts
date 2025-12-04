@@ -29,13 +29,10 @@ class EnvironmentVariables {
   JWT_EXPIRES_IN?: string;
 
   @IsString()
-  NEO4J_URI!: string;
+  APP_NEO4J_URI!: string;
 
   @IsString()
-  NEO4J_USER!: string;
-
-  @IsString()
-  NEO4J_PASSWORD!: string;
+  NEO4J_AUTH!: string;
 }
 
 export function validate(config: Record<string, unknown>) {

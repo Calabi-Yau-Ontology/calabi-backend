@@ -7,19 +7,19 @@ class EnvironmentVariables {
   PORT?: string;
 
   @IsString()
-  DB_HOST!: string;
+  POSTGRES_HOST!: string;
 
   @IsString()
-  DB_PORT!: string;
+  POSTGRES_PORT!: string;
 
   @IsString()
-  DB_USER!: string;
+  POSTGRES_USER!: string;
 
   @IsString()
-  DB_PASSWORD!: string;
+  POSTGRES_PASSWORD!: string;
 
   @IsString()
-  DB_NAME!: string;
+  POSTGRES_DB!: string;
 
   @IsString()
   JWT_SECRET!: string;
@@ -29,13 +29,10 @@ class EnvironmentVariables {
   JWT_EXPIRES_IN?: string;
 
   @IsString()
-  NEO4J_URI!: string;
+  APP_NEO4J_URI!: string;
 
   @IsString()
-  NEO4J_USER!: string;
-
-  @IsString()
-  NEO4J_PASSWORD!: string;
+  NEO4J_AUTH!: string;
 }
 
 export function validate(config: Record<string, unknown>) {

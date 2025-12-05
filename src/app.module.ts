@@ -9,11 +9,18 @@ import { AuthModule } from './auth/auth.module';
 import { EventsModule } from './events/events.module';
 import { SuggestionsModule } from './suggestions/suggestions.module';
 import { OntologyModule } from './ontology/ontology.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      envFilePath:
+        process.env.NODE_ENV === 'dev'
+          ? '.env.dev'
+          : process.env.NODE_ENV === 'prod'
+          ? '.env.prod'
+          : '.env.test',
       load: [configuration],
       validate,
     }),
@@ -24,6 +31,7 @@ import { OntologyModule } from './ontology/ontology.module';
     EventsModule,
     SuggestionsModule,
     OntologyModule,
+    HealthModule,
   ],
 })
 export class AppModule {}

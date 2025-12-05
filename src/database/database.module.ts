@@ -16,7 +16,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
           password: db.password,
           database: db.name,
           autoLoadEntities: true,
-          synchronize: true, // 개발 중에는 true, 나중에 false + migration
+          synchronize: true, // 개발 단계에서만 true
         };
       },
     }),

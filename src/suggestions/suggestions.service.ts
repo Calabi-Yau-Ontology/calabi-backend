@@ -16,7 +16,7 @@ export class SuggestionsService {
     private readonly configService: ConfigService,
   ) {
     const mlConfig = this.configService.get('ml');
-    this.baseUrl = mlConfig?.baseUrl ?? 'http://localhost:8001';
+    this.baseUrl = mlConfig?.baseUrl ?? 'http://localhost:8000';
   }
 
   /**

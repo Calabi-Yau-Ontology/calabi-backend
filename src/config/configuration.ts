@@ -19,4 +19,9 @@ export default () => ({
     user: process.env.NEO4J_AUTH?.split('/')[0] ?? 'neo4j',
     password: process.env.NEO4J_AUTH?.split('/')[1] ?? 'password',
   },
+  google: {
+    clientId: process.env.GOOGLE_CLIENT_ID ?? '',
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '',
+    redirectUri: process.env.GOOGLE_REDIRECT_URI ?? '',
+  },
 });

@@ -55,14 +55,14 @@ export class UsersService {
   }
 
   /** 응답에서 passwordHash 제거용 헬퍼 */
-  sanitize(user: User | null) {
+  sanitize(user: User | null): Omit<User, 'passwordHash'> | null {
     if (!user) return null;
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { passwordHash, ...rest } = user;
     return rest;
   }
 
-  sanitizeMany(users: User[]) {
-    return users.map((u) => this.sanitize(u));
+  sanitizeMany(users: User[]): Array<Omit<User, 'passwordHash'>> {
+    return users.map((u) => this.sanitize(u)!);
   }
 }

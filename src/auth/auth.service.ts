@@ -1,10 +1,16 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { randomBytes } from 'crypto';
+import * as bcrypt from 'bcrypt';
 import { UsersService } from '../users/users.service';
 import { User } from '../users/entities/user.entity';
 import { GoogleProfile } from './dtos/google.dto';
-import { LoginOutput } from './dtos/login.dto';
+import { LocalLoginDto, LoginOutput } from './dtos/login.dto';
+import { RegisterDto } from './dtos/register.dto';
 
 @Injectable()
 export class AuthService {
@@ -26,15 +32,31 @@ export class AuthService {
       });
     }
 
-    const accessToken = this.jwtService.sign({
-      sub: user.id,
-      email: user.email,
-    });
+    return this.buildLoginResponse(user);
+  }
 
-    return {
-      access_token: accessToken,
-      user: this.usersService.sanitize(user)!,
-    };
+  async loginWithCredentials(dto: LocalLoginDto): Promise<LoginOutput> {
+    const user = await this.usersService.findByEmail(dto.email);
+    if (!user) {
+      throw new UnauthorizedException('Email or password is incorrect.');
+    }
+
+    const isMatch = await bcrypt.compare(dto.password, user.passwordHash);
+    if (!isMatch) {
+      throw new UnauthorizedException('Email or password is incorrect.');
+    }
+
+    return this.buildLoginResponse(user);
+  }
+
+  async register(dto: RegisterDto): Promise<LoginOutput> {
+    const existing = await this.usersService.findByEmail(dto.email);
+    if (existing) {
+      throw new BadRequestException('Email is already in use.');
+    }
+
+    const user = await this.usersService.create(dto);
+    return this.buildLoginResponse(user);
   }
 
   getProfile(user: User) {
@@ -43,5 +65,17 @@ export class AuthService {
 
   private generateRandomPassword(): string {
     return randomBytes(32).toString('hex');
+  }
+
+  private buildLoginResponse(user: User): LoginOutput {
+    const payload = {
+      sub: user.id,
+      email: user.email,
+    };
+    const accessToken = this.jwtService.sign(payload);
+    return {
+      access_token: accessToken,
+      user: this.usersService.sanitize(user)!,
+    };
   }
 }

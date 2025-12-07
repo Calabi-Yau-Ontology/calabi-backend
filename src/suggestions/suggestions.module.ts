@@ -1,9 +1,12 @@
 import { Module } from '@nestjs/common';
-import { SuggestionsController } from './suggestions.controller';
+import { HttpModule } from '@nestjs/axios';
 import { SuggestionsService } from './suggestions.service';
+import { SuggestionsController } from './suggestions.controller';
 
 @Module({
+  imports: [HttpModule],
   controllers: [SuggestionsController],
-  providers: [SuggestionsService]
+  providers: [SuggestionsService],
+  exports: [SuggestionsService],
 })
 export class SuggestionsModule {}

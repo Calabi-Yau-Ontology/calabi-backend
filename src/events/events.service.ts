@@ -37,10 +37,12 @@ export class EventsService {
     const saved = await this.eventsRepo.save(event);
 
     // NER 실행
-    const nerResult = await this.suggestionsService.runNer({ text: saved.title + ' ' + saved.description });
+    const nerResult = await this.suggestionsService.runNer({
+      text: `${saved.title ?? ''} ${saved.description ?? ''}`.trim(),
+    });
 
     // Ontology 반영
-    await this.ontologyService.processEventOntology(userId, saved, nerResult);
+    await this.ontologyService.processEventOntology(saved.user, saved, nerResult);
 
     return saved;
   }
@@ -81,10 +83,12 @@ export class EventsService {
     const saved = await this.eventsRepo.save(event);
 
     // NER 실행
-    const nerResult = await this.suggestionsService.runNer({ text: saved.title + ' ' + saved.description });
+    const nerResult = await this.suggestionsService.runNer({
+      text: `${saved.title ?? ''} ${saved.description ?? ''}`.trim(),
+    });
 
     // Ontology 반영
-    await this.ontologyService.processEventOntology(userId, saved, nerResult);
+    await this.ontologyService.processEventOntology(saved.user, saved, nerResult);
 
     return saved;
   }
@@ -92,6 +96,7 @@ export class EventsService {
   async remove(userId: string, id: string): Promise<{ deleted: boolean }> {
     const event = await this.findOneByUser(userId, id);
     await this.eventsRepo.remove(event);
+    await this.ontologyService.removeEvent(event.id);
     return { deleted: true };
   }
 }

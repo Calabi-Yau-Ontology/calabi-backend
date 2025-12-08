@@ -2,6 +2,7 @@
 import {
   Body,
   Controller,
+  Get,
   Post,
   Request,
   UseGuards,
@@ -14,12 +15,8 @@ import { JwtAuthGuard } from '../auth/jwt/jwt.guard';
 export class SuggestionsController {
   constructor(private readonly suggestionsService: SuggestionsService) {}
 
-  // 이미 있을 수 있는 엔드포인트:
-  // @Post('ner')
-  // async runNer(@Body() dto: RunNerDto) { ... }
-
   @UseGuards(JwtAuthGuard)
-  @Post('suggest')
+  @Get('suggest')
   async suggest(@Request() req: any, @Body() dto: SuggestRequestDto) {
     const userId = req.user.id; // JwtStrategy에서 넣어준 값
     return this.suggestionsService.runSuggest(userId, dto);

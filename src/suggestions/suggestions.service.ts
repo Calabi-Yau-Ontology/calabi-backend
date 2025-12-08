@@ -21,7 +21,7 @@ export class SuggestionsService {
     private readonly eventsRepo: Repository<Event>,
   ) {
     const mlConfig = this.configService.get('ml');
-    this.baseUrl = mlConfig?.baseUrl ?? 'http://localhost:8001';
+    this.baseUrl = mlConfig.baseUrl;
   }
 
   /**

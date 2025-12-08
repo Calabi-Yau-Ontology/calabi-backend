@@ -21,7 +21,7 @@ export class EventsController {
 
   @Post()
   create(@Request() req: any, @Body() dto: CreateEventDto) {
-    const userId = req.user.userId;
+    const userId = req.user.id;
     return this.eventsService.create(userId, dto);
   }
 

@@ -27,13 +27,13 @@ export class EventsController {
 
   @Get()
   findAll(@Request() req: any) {
-    const userId = req.user.userId;
+    const userId = req.user.id;
     return this.eventsService.findAllByUser(userId);
   }
 
   @Get(':id')
   findOne(@Request() req: any, @Param('id') id: string) {
-    const userId = req.user.userId;
+    const userId = req.user.id;
     return this.eventsService.findOneByUser(userId, id);
   }
 
@@ -43,13 +43,13 @@ export class EventsController {
     @Param('id') id: string,
     @Body() dto: UpdateEventDto,
   ) {
-    const userId = req.user.userId;
+    const userId = req.user.id;
     return this.eventsService.update(userId, id, dto);
   }
 
   @Delete(':id')
   remove(@Request() req: any, @Param('id') id: string) {
-    const userId = req.user.userId;
+    const userId = req.user.id;
     return this.eventsService.remove(userId, id);
   }
 }

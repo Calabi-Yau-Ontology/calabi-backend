@@ -95,8 +95,9 @@ export class EventsService {
 
   async remove(userId: string, id: string): Promise<{ deleted: boolean }> {
     const event = await this.findOneByUser(userId, id);
+    const eventId = event.id;
     await this.eventsRepo.remove(event);
-    await this.ontologyService.removeEvent(event.id);
+    await this.ontologyService.removeEvent(eventId);
     return { deleted: true };
   }
 }

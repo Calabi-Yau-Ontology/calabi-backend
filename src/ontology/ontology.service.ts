@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Neo4jService } from 'src/neo4j/neo4j.service';
 import { NER_TO_CONCEPT_TYPE } from './constants/concept-mapping';
+import { RELATIONS } from './constants/relations';
 import { Event } from 'src/events/entities/event.entity';
 import { NerResponseDto } from 'src/suggestions/dto/ner-response.dto';
 import { User } from 'src/users/entities/user.entity';
@@ -70,7 +71,7 @@ export class OntologyService {
     const cypher = `
       MATCH (e:Event {eventId: $eventId})
       MATCH (c:Concept {name: $conceptName})
-      MERGE (e)-[:MENTIONS]->(c)
+      MERGE (e)-[:${RELATIONS.MENTIONS}]->(c)
     `;
     await this.neo4j.run(cypher, { eventId, conceptName });
   }
@@ -79,7 +80,7 @@ export class OntologyService {
     const cypher = `
       MATCH (u:User {id: $userId})
       MATCH (c:Concept {name: $conceptName})
-      MERGE (u)-[:RELATED_TO]->(c)
+      MERGE (u)-[:${RELATIONS.RELATED_TO}]->(c)
     `;
     await this.neo4j.run(cypher, { userId, conceptName });
   }
@@ -88,7 +89,7 @@ export class OntologyService {
     const cypher = `
       MATCH (u:User {id: $userId})
       MATCH (e:Event {eventId: $eventId})
-      MERGE (u)-[:CREATED]->(e)
+      MERGE (u)-[:${RELATIONS.OWNS_EVENT}]->(e)
     `;
     await this.neo4j.run(cypher, { userId, eventId });
   }

@@ -1,0 +1,5 @@
+export const RELATIONS = {
+  OWNS_EVENT: 'OWNS_EVENT',
+  MENTIONS: 'MENTIONS',
+  RELATED_TO: 'RELATED_TO',
+};

@@ -5,6 +5,8 @@ import { Event } from './entities/event.entity';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { UsersService } from '../users/users.service';
+import { OntologyService } from 'src/ontology/ontology.service';
+import { SuggestionsService } from 'src/suggestions/suggestions.service';
 
 @Injectable()
 export class EventsService {
@@ -12,6 +14,8 @@ export class EventsService {
     @InjectRepository(Event)
     private readonly eventsRepo: Repository<Event>,
     private readonly usersService: UsersService,
+    private readonly ontologyService: OntologyService,
+    private readonly suggestionsService: SuggestionsService,
   ) {}
 
   async create(userId: string, dto: CreateEventDto): Promise<Event> {
@@ -29,7 +33,18 @@ export class EventsService {
       location: dto.location,
     });
 
-    return this.eventsRepo.save(event);
+    // return this.eventsRepo.save(event);
+    const saved = await this.eventsRepo.save(event);
+
+    // NER 실행
+    const nerResult = await this.suggestionsService.runNer({
+      text: `${saved.title ?? ''} ${saved.description ?? ''}`.trim(),
+    });
+
+    // Ontology 반영
+    await this.ontologyService.processEventOntology(saved.user, saved, nerResult);
+
+    return saved;
   }
 
   findAllByUser(userId: string): Promise<Event[]> {
@@ -63,13 +78,26 @@ export class EventsService {
     if (dto.endTime !== undefined)
       event.endTime = dto.endTime ? new Date(dto.endTime) : null;
     if (dto.location !== undefined) event.location = dto.location;
+    
+    // return this.eventsRepo.save(event);
+    const saved = await this.eventsRepo.save(event);
 
-    return this.eventsRepo.save(event);
+    // NER 실행
+    const nerResult = await this.suggestionsService.runNer({
+      text: `${saved.title ?? ''} ${saved.description ?? ''}`.trim(),
+    });
+
+    // Ontology 반영
+    await this.ontologyService.processEventOntology(saved.user, saved, nerResult);
+
+    return saved;
   }
 
   async remove(userId: string, id: string): Promise<{ deleted: boolean }> {
     const event = await this.findOneByUser(userId, id);
+    const eventId = event.id;
     await this.eventsRepo.remove(event);
+    await this.ontologyService.removeEvent(eventId);
     return { deleted: true };
   }
 }

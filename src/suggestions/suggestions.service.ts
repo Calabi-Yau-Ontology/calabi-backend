@@ -8,6 +8,8 @@ import { AxiosError } from 'axios';
 import { Event } from '../events/entities/event.entity';
 import { SuggestRequestDto } from './dto/suggest-request.dto';
 import { SuggestResponseDto } from './dto/suggest-response.dto';
+import { NerResponseDto } from './dto/ner-response.dto';
+import { RunNerDto } from './dto/run-ner.dto';
 
 @Injectable()
 export class SuggestionsService {
@@ -24,14 +26,11 @@ export class SuggestionsService {
     this.baseUrl = mlConfig.baseUrl;
   }
 
-  /**
-   * 단순 NER 프록시 (이미 구현돼 있다면 그대로 두면 됨)
-   */
-  async runNer(text: string) {
+  async runNer(text: RunNerDto): Promise<NerResponseDto> {
     const url = `${this.baseUrl}/nlp/ner`;
 
     try {
-      const response$ = this.httpService.post(url, { text });
+      const response$ = this.httpService.post(url, text);
       const { data } = await firstValueFrom(response$);
       return data;
     } catch (error) {

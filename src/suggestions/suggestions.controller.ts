@@ -1,9 +1,7 @@
-// src/suggestions/suggestions.controller.ts
 import {
-  Body,
   Controller,
   Get,
-  Post,
+  Query,
   Request,
   UseGuards,
 } from '@nestjs/common';
@@ -17,7 +15,7 @@ export class SuggestionsController {
 
   @UseGuards(JwtAuthGuard)
   @Get('suggest')
-  async suggest(@Request() req: any, @Body() dto: SuggestRequestDto) {
+  async suggest(@Request() req: any, @Query() dto: SuggestRequestDto) {
     const userId = req.user.id; // JwtStrategy에서 넣어준 값
     return this.suggestionsService.runSuggest(userId, dto);
   }

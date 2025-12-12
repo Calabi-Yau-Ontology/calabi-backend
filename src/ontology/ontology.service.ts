@@ -67,7 +67,6 @@ export class OntologyService {
     type: string,
     opts?: { externalId?: string; source?: string },
   ) {
-    console.log("given args:", name, type, opts);
     const cypher = `
       MERGE (c:Concept:${type} { name: $name })
       ON CREATE SET
@@ -101,9 +100,7 @@ export class OntologyService {
 
     // 2) Wikidata 검색
     const entity = await this.wikidata.searchEntity(name);
-    console.log('ff:', entity);
     if (!entity) return;
-    console.log("check 1");
 
     const qid = entity.id; // Q번호
 
@@ -112,7 +109,6 @@ export class OntologyService {
       externalId: qid,
       source: 'wikidata',
     });
-    console.log("check 2");
 
     // 4) 이웃 가져오기
     const neighbors = await this.wikidata.fetchNeighbors(qid);

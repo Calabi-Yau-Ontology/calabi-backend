@@ -49,7 +49,6 @@ export class WikidataService {
     try {
       const res$ = this.http.get(this.searchEndpoint, { params });
       const { data } = await firstValueFrom(res$);
-      console.log('data: ', data);
 
       if (!data?.search?.length) return null;
 
@@ -88,7 +87,6 @@ export class WikidataService {
     try {
       const res$ = this.http.get(this.sparqlEndpoint, { params });
       const { data } = await firstValueFrom(res$);
-      console.log("result of fetch nei: ", data);
       const results = data?.results?.bindings ?? [];
 
       const neighbors: WikidataNeighbor[] = [];

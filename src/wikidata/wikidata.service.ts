@@ -97,9 +97,9 @@ export class WikidataService {
         const valueLabel: string = row.valueLabel?.value ?? '';
 
         const pid = propertyIri.split('/').pop(); // "P31" etc.
-        const qid2 = valueIri.split('/').pop();   // "Qxxxx"
+        const neighborQid = valueIri.split('/').pop();   // "Qxxxx"
 
-        if (!qid2 || !valueLabel) continue;
+        if (!neighborQid || !valueLabel) continue;
 
         let relation: WikidataNeighbor['relation'] | null = null;
         if (pid === 'P31') relation = 'INSTANCE_OF';
@@ -110,7 +110,7 @@ export class WikidataService {
         if (!relation) continue;
 
         neighbors.push({
-          id: qid2,
+          id: neighborQid,
           label: valueLabel,
           relation,
         });

@@ -74,7 +74,7 @@ export class WikidataService {
         VALUES ?item { wd:${qid} }
         ?item ?p ?value .
         ?property wikibase:directClaim ?p .
-        VALUES ?property { wd:P31 wd:P279 wd:P527 wd:P42 }
+        VALUES ?property { wd:P31 wd:P279 wd:P527 wd:P3712 }
         SERVICE wikibase:label { bd:serviceParam wikibase:language "${this.language}" . }
       }
     `;
@@ -105,7 +105,7 @@ export class WikidataService {
         if (pid === 'P31') relation = 'INSTANCE_OF';
         else if (pid === 'P279') relation = 'SUBCLASS_OF';
         else if (pid === 'P527') relation = 'HAS_PART';
-        else if (pid === 'P42') relation = 'HAS_GOAL';
+        else if (pid === 'P3712') relation = 'HAS_GOAL';
 
         if (!relation) continue;
 

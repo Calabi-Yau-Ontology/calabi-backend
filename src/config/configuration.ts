@@ -27,4 +27,9 @@ export default () => ({
   ml: {
     baseUrl: process.env.ML_BASE_URL ?? 'http://localhost:8000',
   },
+  wikidata: {
+    sparqlEndpoint: process.env.WIKIDATA_SPARQL_ENDPOINT,
+    searchEndpoint: process.env.WIKIDATA_SEARCH_ENDPOINT,
+    language: process.env.WIKIDATA_LANGUAGE || 'ko,en',
+  },
 });

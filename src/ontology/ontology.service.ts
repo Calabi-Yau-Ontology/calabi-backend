@@ -1,14 +1,18 @@
 import { Injectable } from '@nestjs/common';
 import { Neo4jService } from 'src/neo4j/neo4j.service';
 import { NER_TO_CONCEPT_TYPE } from './constants/concept-mapping';
-import { RELATIONS } from './constants/relations';
+import { WikidataService } from 'src/wikidata/wikidata.service';
+import { RELATIONS, RelationValue } from './constants/relations';
 import { Event } from 'src/events/entities/event.entity';
 import { NerResponseDto } from 'src/suggestions/dto/ner-response.dto';
 import { User } from 'src/users/entities/user.entity';
 
 @Injectable()
 export class OntologyService {
-  constructor(private readonly neo4j: Neo4jService) {}
+  constructor(
+    private readonly neo4j: Neo4jService,
+    private readonly wikidata: WikidataService,
+  ) {}
 
   private toDateTimeString(date?: Date | null): string | null {
     return date ? date.toISOString() : null;
@@ -58,13 +62,89 @@ export class OntologyService {
     });
   }
 
-  async upsertConcept(name: string, type: string) {
+  async upsertConcept(
+    name: string,
+    type: string,
+    opts?: { externalId?: string; source?: string },
+  ) {
     const cypher = `
       MERGE (c:Concept:${type} { name: $name })
-      ON CREATE SET c.createdAt = datetime()
+      ON CREATE SET
+        c.createdAt = datetime()
+      SET
+        c.externalId = COALESCE($externalId, c.externalId),
+        c.source = COALESCE($source, c.source),
+        c.updatedAt = datetime()
       RETURN c
     `;
-    return this.neo4j.run(cypher, { name });
+
+    await this.neo4j.run(cypher, {
+      name,
+      externalId: opts?.externalId ?? null,
+      source: opts?.source ?? null,
+    });
+  }
+
+  async expandConceptFromWikidata(name: string, type: string) {
+    // 1) Concept 이미 externalId가 있다면, 재확장하지 않도록 early return (optional)
+    const checkCypher = `
+      MATCH (c:Concept:${type} {name: $name})
+      RETURN c.externalId AS externalId
+    `;
+    const result = await this.neo4j.run(checkCypher, { name });
+    const existing = result.records?.[0]?.get?.('externalId');
+    if (existing) {
+      // 이미 Wikidata 연동된 Concept라면 확장 스킵
+      return;
+    }
+
+    // 2) Wikidata 검색
+    const entity = await this.wikidata.searchEntity(name);
+    if (!entity) return;
+
+    const qid = entity.id; // Q번호
+
+    // 3) Concept 노드에 externalId / source 업데이트
+    await this.upsertConcept(name, type, {
+      externalId: qid,
+      source: 'wikidata',
+    });
+
+    // 4) 이웃 가져오기
+    const neighbors = await this.wikidata.fetchNeighbors(qid);
+    if (!neighbors.length) return;
+
+    // 5) 이웃 Concept upsert + 관계 생성
+    for (const nb of neighbors) {
+      const neighborType = 'Concept'; // 일단 타입은 generic, 나중에 분류 가능
+
+      await this.upsertConcept(nb.label, neighborType, {
+        externalId: nb.id,
+        source: 'wikidata',
+      });
+
+      let relation: RelationValue;
+      if (nb.relation === 'INSTANCE_OF') relation = RELATIONS.INSTANCE_OF;
+      else if (nb.relation === 'SUBCLASS_OF') relation = RELATIONS.SUBCLASS_OF;
+      else if (nb.relation === 'HAS_PART') relation = RELATIONS.HAS_PART;
+      else relation = RELATIONS.HAS_GOAL;
+
+      await this.linkConceptToConcept(name, nb.label, relation);
+    }
+  }
+
+  async linkConceptToConcept(
+    fromName: string,
+    toName: string,
+    relation: RelationValue,
+  ) {
+    const cypher = `
+      MATCH (c1:Concept {name: $fromName})
+      MATCH (c2:Concept {name: $toName})
+      MERGE (c1)-[r:${relation}]->(c2)
+      RETURN r
+    `;
+    await this.neo4j.run(cypher, { fromName, toName });
   }
 
   async linkEventToConcept(eventId: string, conceptName: string) {
@@ -127,6 +207,14 @@ export class OntologyService {
       await this.upsertConcept(conceptName, conceptType);
       await this.linkEventToConcept(event.id, conceptName);
       await this.linkUserToConcept(user.id, conceptName);
+
+      // Wikidata 확장 (best-effort)
+      try {
+        await this.expandConceptFromWikidata(conceptName, conceptType);
+      } catch (e) {
+        // 절대 메인 플로우 깨지지 않게 로그만
+        console.error('Wikidata expansion failed', e);
+      }
     }
   }
 }

@@ -31,5 +31,6 @@ export default () => ({
     sparqlEndpoint: process.env.WIKIDATA_SPARQL_ENDPOINT,
     searchEndpoint: process.env.WIKIDATA_SEARCH_ENDPOINT,
     language: process.env.WIKIDATA_LANGUAGE || 'ko,en',
+    maxNeighbors: parseInt(process.env.WIKIDATA_MAX_NEIGHBORS ?? '200', 10),
   },
 });

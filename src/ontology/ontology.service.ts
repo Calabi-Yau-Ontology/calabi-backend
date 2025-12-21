@@ -85,6 +85,21 @@ export class OntologyService {
     });
   }
 
+  async upsertConceptWithProps(
+    name: string,
+    type: string, 
+    props?: Record<string, any>
+  ) {
+    const cypher = `
+      MERGE (c:Concept:${type} { name: $name })
+      ON CREATE SET c.createdAt = datetime()
+      SET c += $props
+      RETURN c
+    `;
+    return this.neo4j.run(cypher, { name, props: props ?? {} });
+  }
+
+
   async expandConceptFromWikidata(name: string, type: string) {
     // 1) Concept 이미 externalId가 있다면, 재확장하지 않도록 early return (optional)
     const checkCypher = `
@@ -190,31 +205,68 @@ export class OntologyService {
     await this.neo4j.run(cypher, { eventId });
   }
 
+  // async processEventOntology(user: User, event: Event, ner: NerResponseDto) {
+  //   const entities = ner?.entities ?? [];
+
+  //   await this.upsertUser(user);
+  //   await this.upsertEvent(event);
+  //   await this.linkUserToEvent(user.id, event.id);
+  //   await this.clearEventConceptLinks(event.id);
+
+  //   for (const ent of entities) {
+  //     const conceptName = ent.text?.trim();
+  //     if (!conceptName) {
+  //       continue;
+  //     }
+  //     const conceptType = NER_TO_CONCEPT_TYPE[ent.label] ?? 'Concept';
+  //     await this.upsertConcept(conceptName, conceptType);
+  //     await this.linkEventToConcept(event.id, conceptName);
+  //     await this.linkUserToConcept(user.id, conceptName);
+
+  //     // Wikidata 확장 (best-effort)
+  //     try {
+  //       await this.expandConceptFromWikidata(conceptName, conceptType);
+  //     } catch (e) {
+  //       // 절대 메인 플로우 깨지지 않게 로그만
+  //       console.error('Wikidata expansion failed', e);
+  //     }
+  //   }
+  // }
+  // import { GRAPH_ALLOWED_LABELS } from './constants/allowed-ner-labels';
+  // import { NER_TO_CONCEPT_TYPE } from './constants/concept-mapping';
+  // import { NerResponseDto } from 'src/suggestions/dto/ner-response.dto';
+
   async processEventOntology(user: User, event: Event, ner: NerResponseDto) {
-    const entities = ner?.entities ?? [];
+    const entities = ner?.mentions ?? [];
 
     await this.upsertUser(user);
     await this.upsertEvent(event);
     await this.linkUserToEvent(user.id, event.id);
     await this.clearEventConceptLinks(event.id);
 
-    for (const ent of entities) {
-      const conceptName = ent.text?.trim();
-      if (!conceptName) {
-        continue;
-      }
-      const conceptType = NER_TO_CONCEPT_TYPE[ent.label] ?? 'Concept';
-      await this.upsertConcept(conceptName, conceptType);
-      await this.linkEventToConcept(event.id, conceptName);
-      await this.linkUserToConcept(user.id, conceptName);
+    console.log(`Processing NER entities for event ${event.id}:`, entities);
 
-      // Wikidata 확장 (best-effort)
-      try {
-        await this.expandConceptFromWikidata(conceptName, conceptType);
-      } catch (e) {
-        // 절대 메인 플로우 깨지지 않게 로그만
-        console.error('Wikidata expansion failed', e);
-      }
+    for (const ent of entities) {
+      const label = ent?.ner.label;
+      // if (!label || !GRAPH_ALLOWED_LABELS.includes(label)) continue;
+      const conceptType = NER_TO_CONCEPT_TYPE[label] ?? 'None';
+      if (conceptType === 'None') continue;
+
+      const canonicalName = ent?.canonical.en; // Concept.name 으로 쓸 값(영어)
+      if (!canonicalName) continue; // canonical 없으면 스킵
+
+      const surface = ent?.surface; // provenance 보관용
+
+      // const conceptType = NER_TO_CONCEPT_TYPE[label] ?? 'Concept';
+
+      await this.upsertConceptWithProps(canonicalName, conceptType, {
+        surfaceKo: surface,
+        source: 'ml',
+      });
+
+      await this.linkEventToConcept(event.id, canonicalName);
+      await this.linkUserToConcept(user.id, canonicalName);
     }
   }
+
 }

@@ -26,19 +26,33 @@ export class SuggestionsService {
     this.baseUrl = mlConfig.baseUrl;
   }
 
+  // async runNer(text: RunNerDto): Promise<NerResponseDto> {
+  //   const url = `${this.baseUrl}/nlp/ner`;
+
+  //   try {
+  //     const response$ = this.httpService.post(url, text);
+  //     const { data } = await firstValueFrom(response$);
+  //     return data;
+  //   } catch (error) {
+  //     const err = error as AxiosError;
+  //     this.logger.error(`NER request failed: ${err.message}`, err.stack);
+  //     return { entities: [] };
+  //   }
+  // }
   async runNer(text: RunNerDto): Promise<NerResponseDto> {
     const url = `${this.baseUrl}/nlp/ner`;
 
     try {
-      const response$ = this.httpService.post(url, text);
+      const response$ = this.httpService.post<NerResponseDto>(url, text);
       const { data } = await firstValueFrom(response$);
-      return data;
+      return data ?? { mentions: [] };
     } catch (error) {
       const err = error as AxiosError;
       this.logger.error(`NER request failed: ${err.message}`, err.stack);
-      return { entities: [] };
+      return { mentions: [], errors: [{ stage: 'backend_http', message: err.message }] };
     }
   }
+
 
   /**
    * 과거 이벤트에서 history / popular_tags 생성 후

@@ -148,37 +148,56 @@ export class OntologyService {
   async processEventOntology(user: User, event: Event, ner: NerResponseDto) {
     const mentions = ner?.mentions ?? [];
 
-    await this.upsertUser(user);
-    await this.upsertEvent(event);
-    await this.linkUserToEvent(user.id, event.id);
-    await this.clearEventConceptLinks(event.id);
+    await Promise.all([this.upsertUser(user), this.upsertEvent(event)]);
+    await Promise.all([this.linkUserToEvent(user.id, event.id), this.clearEventConceptLinks(event.id)]);
+
+    const conceptMap = new Map<
+      string,
+      {
+        conceptType: ConceptType;
+        provenance: string | null;
+      }
+    >();
 
     for (const m of mentions) {
       const label = m?.ner?.label;
-      const conceptType = NER_TO_CONCEPT_TYPE[label] ?? 'None';
-      if (conceptType === 'None') continue;
+      const mappedType = NER_TO_CONCEPT_TYPE[label] ?? 'None';
+      if (mappedType === 'None') continue;
 
-      const canonicalName = m?.canonical?.en?.trim(); // Concept.name
-      if (!canonicalName) continue;
+      const canonicalName = m?.canonical?.en?.trim();
+      if (!canonicalName || conceptMap.has(canonicalName)) continue;
 
-      const provenance = m?.surface?.trim();
-
-      await this.upsertConceptWithProps(canonicalName, conceptType as ConceptType, {
-        provenance: provenance ?? null,
-        source: 'ml',
+      conceptMap.set(canonicalName, {
+        conceptType: mappedType as ConceptType,
+        provenance: m?.surface?.trim() ?? null,
       });
+    }
 
-      await this.linkEventToConcept(event.id, canonicalName);
-      await this.linkUserToConcept(user.id, canonicalName);
+    const concepts = Array.from(conceptMap.entries()).map(([canonicalName, value]) => ({
+      canonicalName,
+      conceptType: value.conceptType,
+      provenance: value.provenance,
+    }));
 
-      // 결정론 확장(중복 호출 안전)
-      try {
-        await this.expansionService.expandConceptByName(canonicalName);
-      } catch (e: any) {
+    await Promise.all(
+      concepts.map(async ({ canonicalName, conceptType, provenance }) => {
+        await this.upsertConceptWithProps(canonicalName, conceptType, {
+          provenance,
+          source: 'ml',
+        });
+        await Promise.all([
+          this.linkEventToConcept(event.id, canonicalName),
+          this.linkUserToConcept(user.id, canonicalName),
+        ]);
+      }),
+    );
+
+    for (const { canonicalName } of concepts) {
+      void this.expansionService.expandConceptByName(canonicalName).catch((e: any) => {
         this.logger.warn(
           `Wikidata expansion skipped for "${canonicalName}": ${e?.message ?? e}`,
         );
-      }
+      });
     }
   }
 }

@@ -77,7 +77,7 @@ export class OntologyService {
     props?: Record<string, any>,
   ) {
     const cypher = `
-      MERGE (c:Concept:${type} { name: $name })
+      MERGE (c:Concept:${type} { name: $name, type: $type })
       ON CREATE SET
         c.createdAt = datetime(),
         c.source = COALESCE($source, c.source),
@@ -90,6 +90,7 @@ export class OntologyService {
     `;
     return this.neo4j.run(cypher, {
       name,
+      type,
       source: props?.source ?? 'ml',
       props: props ?? {},
     });

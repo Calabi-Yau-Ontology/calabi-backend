@@ -1,7 +1,7 @@
 export const NEO4J_SCHEMA_STATEMENTS: string[] = [
-  // Concept: canonical name unique
-  `CREATE CONSTRAINT concept_name_unique IF NOT EXISTS
-   FOR (c:Concept) REQUIRE c.name IS UNIQUE`,
+  // Concept: canonical name+type unique
+  `CREATE CONSTRAINT concept_name_type_unique IF NOT EXISTS
+   FOR (c:Concept) REQUIRE (c.name, c.type) IS UNIQUE`,
 
   // Event 고유키
   `CREATE CONSTRAINT event_eventId_unique IF NOT EXISTS
@@ -16,5 +16,5 @@ export const NEO4J_SCHEMA_STATEMENTS: string[] = [
    FOR (c:Concept) ON (c.wikidataQid)`,
 
   `CREATE INDEX concept_expanded_at_idx IF NOT EXISTS
-   FOR (c:Concept) ON (c.wikidataExpandedAt)`,
+   FOR (c:Concept) ON (c.wikidataExpandedAt)`
 ];

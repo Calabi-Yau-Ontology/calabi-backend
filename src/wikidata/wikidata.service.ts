@@ -48,7 +48,7 @@ export class WikidataService {
     };
 
     try {
-      console.log('Wikidata search params:', params);
+      // console.log('Wikidata search params:', params);
       const res$ = this.http.get(this.searchEndpoint, {
         params,
       });
@@ -88,7 +88,7 @@ export class WikidataService {
     `;
 
     try {
-      console.log('Wikidata SPARQL query:', sparql);
+      // console.log('Wikidata SPARQL query:', sparql);
       const res$ = this.http.get(this.sparqlEndpoint, {
         params: {
           format: 'json',
@@ -97,7 +97,7 @@ export class WikidataService {
       });
 
       const { data } = await firstValueFrom(res$);
-      console.log('Wikidata SPARQL data:', data);
+      // console.log('Wikidata SPARQL data:', data);
       const bindings = data?.results?.bindings ?? [];
 
       const neighbors: WikidataNeighbor[] = [];

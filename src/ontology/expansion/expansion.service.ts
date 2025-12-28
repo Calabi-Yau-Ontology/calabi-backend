@@ -32,7 +32,7 @@ export class ExpansionService {
 
     // 3) qid 확보
     let qid = concept.wikidataQid?.trim() ?? '';
-    console.log('Existing QID:', qid);
+    // console.log('Existing QID:', qid);
     if (!qid) {
       qid = await this.resolveQidByCanonicalName(name);
       if (!qid) {
@@ -44,8 +44,8 @@ export class ExpansionService {
 
     // 4) neighbors
     const edges = await this.wikidata.fetchNeighbors(qid);
-    console.log('Fetched edges:', edges);
-    console.log(`Fetched ${edges.length} neighbors for QID ${qid}`);
+    // console.log('Fetched edges:', edges);
+    // console.log(`Fetched ${edges.length} neighbors for QID ${qid}`);
     if (!edges.length) {
       // neighbors 없더라도 지금은 “확장 완료”로 마킹
       await this.markExpanded(name);

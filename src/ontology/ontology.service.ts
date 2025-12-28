@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Neo4jService } from 'src/neo4j/neo4j.service';
 import { Event } from 'src/events/entities/event.entity';
 import { User } from 'src/users/entities/user.entity';
@@ -41,7 +41,36 @@ export class OntologyService {
     });
   }
 
-  async upsertEvent(event: Event) {
+  async upsertEvent(event: Event, options?: { requireExisting?: boolean }) {
+    const params = {
+      eventId: event.id,
+      title: event.title,
+      description: event.description ?? null,
+      location: event.location ?? null,
+      startTime: this.toDateTimeString(event.startTime),
+      endTime: this.toDateTimeString(event.endTime ?? null),
+      createdAt: this.toDateTimeString(event.createdAt) ?? new Date().toISOString(),
+      updatedAt: this.toDateTimeString(event.updatedAt) ?? new Date().toISOString(),
+    };
+
+    if (options?.requireExisting) {
+      const cypher = `
+        MATCH (e:Event { eventId: $eventId })
+        SET e.title = $title,
+            e.description = $description,
+            e.location = $location,
+            e.startTime = datetime($startTime),
+            e.endTime = CASE WHEN $endTime IS NULL THEN NULL ELSE datetime($endTime) END,
+            e.updatedAt = datetime($updatedAt)
+        RETURN e
+      `;
+      const result = await this.neo4j.run(cypher, params);
+      if (!result.records.length) {
+        throw new NotFoundException(`Event node (${event.id}) not found in Neo4j for update`);
+      }
+      return result;
+    }
+
     const cypher = `
       MERGE (e:Event { eventId: $eventId })
       ON CREATE SET e.createdAt = datetime($createdAt)
@@ -53,16 +82,7 @@ export class OntologyService {
           e.updatedAt = datetime($updatedAt)
       RETURN e
     `;
-    await this.neo4j.run(cypher, {
-      eventId: event.id,
-      title: event.title,
-      description: event.description ?? null,
-      location: event.location ?? null,
-      startTime: this.toDateTimeString(event.startTime),
-      endTime: this.toDateTimeString(event.endTime ?? null),
-      createdAt: this.toDateTimeString(event.createdAt) ?? new Date().toISOString(),
-      updatedAt: this.toDateTimeString(event.updatedAt) ?? new Date().toISOString(),
-    });
+    return this.neo4j.run(cypher, params);
   }
 
   /**
@@ -146,10 +166,19 @@ export class OntologyService {
    * - Concept upsert 후 Event/User 연결
    * - 그리고 ExpansionService로 “name 기준 1회 확장” 트리거
    */
-  async processEventOntology(user: User, event: Event, ner: NerResponseDto) {
+  async processEventOntology(
+    user: User,
+    event: Event,
+    ner: NerResponseDto,
+    options?: { mode?: 'create' | 'update' },
+  ) {
     const mentions = ner?.mentions ?? [];
+    const mode = options?.mode ?? 'create';
 
-    await Promise.all([this.upsertUser(user), this.upsertEvent(event)]);
+    await Promise.all([
+      this.upsertUser(user),
+      this.upsertEvent(event, { requireExisting: mode === 'update' }),
+    ]);
     await Promise.all([this.linkUserToEvent(user.id, event.id), this.clearEventConceptLinks(event.id)]);
 
     const conceptMap = new Map<

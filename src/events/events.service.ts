@@ -88,7 +88,9 @@ export class EventsService {
     });
 
     // Ontology 반영
-    await this.ontologyService.processEventOntology(saved.user, saved, nerResult);
+    await this.ontologyService.processEventOntology(saved.user, saved, nerResult, {
+      mode: 'update',
+    });
 
     return saved;
   }

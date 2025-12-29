@@ -1,15 +1,18 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Event } from './entities/event.entity';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { UsersService } from '../users/users.service';
+import { User } from 'src/users/entities/user.entity';
 import { OntologyService } from 'src/ontology/ontology.service';
 import { SuggestionsService } from 'src/suggestions/suggestions.service';
 
 @Injectable()
 export class EventsService {
+  private readonly logger = new Logger(EventsService.name);
+
   constructor(
     @InjectRepository(Event)
     private readonly eventsRepo: Repository<Event>,
@@ -36,13 +39,8 @@ export class EventsService {
     // return this.eventsRepo.save(event);
     const saved = await this.eventsRepo.save(event);
 
-    // NER 실행
-    const nerResult = await this.suggestionsService.runNer({
-      text: (saved.title ?? '').trim(),
-    });
-
-    // Ontology 반영
-    await this.ontologyService.processEventOntology(saved.user, saved, nerResult);
+    // NER + 온톨로지 처리를 비동기로 큐잉하여 API 응답을 빠르게 반환
+    this.triggerOntologyProcessing(user, saved, 'create');
 
     return saved;
   }
@@ -70,6 +68,10 @@ export class EventsService {
     dto: UpdateEventDto,
   ): Promise<Event> {
     const event = await this.findOneByUser(userId, id);
+    const user = await this.usersService.findOne(userId);
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
 
     if (dto.title !== undefined) event.title = dto.title;
     if (dto.description !== undefined) event.description = dto.description;
@@ -82,15 +84,8 @@ export class EventsService {
     // return this.eventsRepo.save(event);
     const saved = await this.eventsRepo.save(event);
 
-    // NER 실행
-    const nerResult = await this.suggestionsService.runNer({
-      text: (saved.title ?? '').trim(),
-    });
-
-    // Ontology 반영
-    await this.ontologyService.processEventOntology(saved.user, saved, nerResult, {
-      mode: 'update',
-    });
+    // NER + 온톨로지 처리를 비동기로 큐잉하여 API 응답을 빠르게 반환
+    this.triggerOntologyProcessing(user, saved, 'update');
 
     return saved;
   }
@@ -101,5 +96,32 @@ export class EventsService {
     await this.eventsRepo.remove(event);
     await this.ontologyService.removeEvent(eventId);
     return { deleted: true };
+  }
+
+  private triggerOntologyProcessing(user: User, event: Event, mode: 'create' | 'update'): void {
+    const owner = event.user ?? user;
+    if (!owner) {
+      this.logger.warn(`Skip ontology processing for event ${event.id}: missing user context`);
+      return;
+    }
+
+    const text = (event.title ?? '').trim();
+
+    void (async () => {
+      try {
+        const nerResult = await this.suggestionsService.runNer({
+          text,
+        });
+        await this.ontologyService.processEventOntology(owner, event, nerResult, {
+          mode,
+        });
+      } catch (error) {
+        const err = error as Error;
+        this.logger.error(
+          `Failed to process ontology for event ${event.id} (${mode}): ${err?.message ?? err}`,
+          err?.stack,
+        );
+      }
+    })();
   }
 }

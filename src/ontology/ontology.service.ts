@@ -4,12 +4,9 @@ import { Event } from 'src/events/entities/event.entity';
 import { User } from 'src/users/entities/user.entity';
 import { NerResponseDto } from 'src/suggestions/dto/ner-response.dto';
 
-import { NER_TO_CONCEPT_TYPE } from './constants/concept-mapping';
+import { ConceptType, NER_TO_CONCEPT_TYPE, isAllowedNerLabel } from './constants/concept.types';
 import { RELATIONS } from './constants/relations';
 import { ExpansionService } from './expansion/expansion.service';
-
-const CONCEPT_TYPE_LABELS = ['ActivityType', 'Location', 'Person', 'Project', 'Interest'] as const;
-type ConceptType = (typeof CONCEPT_TYPE_LABELS)[number];
 
 @Injectable()
 export class OntologyService {
@@ -191,14 +188,14 @@ export class OntologyService {
 
     for (const m of mentions) {
       const label = m?.ner?.label;
-      const mappedType = NER_TO_CONCEPT_TYPE[label] ?? 'None';
-      if (mappedType === 'None') continue;
+      if (!isAllowedNerLabel(label)) continue;
+      const mappedType = NER_TO_CONCEPT_TYPE[label];
 
       const canonicalName = m?.canonical?.en?.trim();
       if (!canonicalName || conceptMap.has(canonicalName)) continue;
 
       conceptMap.set(canonicalName, {
-        conceptType: mappedType as ConceptType,
+        conceptType: mappedType,
         provenance: m?.surface?.trim() ?? null,
       });
     }

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Neo4jService } from 'src/neo4j/neo4j.service';
-import { ConceptType } from './concept.types';
+import { ConceptType } from './constants/concept.types';
 
 export type ConceptNode = {
   id: string;

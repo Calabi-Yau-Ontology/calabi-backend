@@ -38,7 +38,7 @@ export class EventsService {
 
     // NER 실행
     const nerResult = await this.suggestionsService.runNer({
-      text: `${saved.title ?? ''}${saved.description ? '; ' + saved.description : ''}`.trim(),
+      text: (saved.title ?? '').trim(),
     });
 
     // Ontology 반영
@@ -84,7 +84,7 @@ export class EventsService {
 
     // NER 실행
     const nerResult = await this.suggestionsService.runNer({
-      text: `${saved.title ?? ''}${saved.description ? '; ' + saved.description : ''}`.trim(),
+      text: (saved.title ?? '').trim(),
     });
 
     // Ontology 반영

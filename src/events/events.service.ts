@@ -38,7 +38,7 @@ export class EventsService {
 
     // NER 실행
     const nerResult = await this.suggestionsService.runNer({
-      text: `${saved.title ?? ''} ${saved.description ?? ''}`.trim(),
+      text: `${saved.title ?? ''}${saved.description ? '; ' + saved.description : ''}`.trim(),
     });
 
     // Ontology 반영
@@ -84,11 +84,13 @@ export class EventsService {
 
     // NER 실행
     const nerResult = await this.suggestionsService.runNer({
-      text: `${saved.title ?? ''} ${saved.description ?? ''}`.trim(),
+      text: `${saved.title ?? ''}${saved.description ? '; ' + saved.description : ''}`.trim(),
     });
 
     // Ontology 반영
-    await this.ontologyService.processEventOntology(saved.user, saved, nerResult);
+    await this.ontologyService.processEventOntology(saved.user, saved, nerResult, {
+      mode: 'update',
+    });
 
     return saved;
   }

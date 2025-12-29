@@ -1,17 +1,23 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Neo4jService } from 'src/neo4j/neo4j.service';
-import { NER_TO_CONCEPT_TYPE } from './constants/concept-mapping';
-import { WikidataService } from 'src/wikidata/wikidata.service';
-import { RELATIONS, RelationValue } from './constants/relations';
 import { Event } from 'src/events/entities/event.entity';
-import { NerResponseDto } from 'src/suggestions/dto/ner-response.dto';
 import { User } from 'src/users/entities/user.entity';
+import { NerResponseDto } from 'src/suggestions/dto/ner-response.dto';
+
+import { NER_TO_CONCEPT_TYPE } from './constants/concept-mapping';
+import { RELATIONS } from './constants/relations';
+import { ExpansionService } from './expansion/expansion.service';
+
+const CONCEPT_TYPE_LABELS = ['ActivityType', 'Location', 'Person', 'Project', 'Interest'] as const;
+type ConceptType = (typeof CONCEPT_TYPE_LABELS)[number];
 
 @Injectable()
 export class OntologyService {
+  private readonly logger = new Logger(OntologyService.name);
+
   constructor(
     private readonly neo4j: Neo4jService,
-    private readonly wikidata: WikidataService,
+    private readonly expansionService: ExpansionService,
   ) {}
 
   private toDateTimeString(date?: Date | null): string | null {
@@ -35,22 +41,8 @@ export class OntologyService {
     });
   }
 
-  async upsertEvent(event: Event) {
-    const cypher = `
-      MERGE (e:Event { eventId: $eventId })
-      ON CREATE SET e.createdAt = datetime($createdAt)
-      SET e.title = $title,
-          e.description = $description,
-          e.location = $location,
-          e.startTime = datetime($startTime),
-          e.endTime = CASE
-            WHEN $endTime IS NULL THEN NULL
-            ELSE datetime($endTime)
-          END,
-          e.updatedAt = datetime($updatedAt)
-      RETURN e
-    `;
-    await this.neo4j.run(cypher, {
+  async upsertEvent(event: Event, options?: { requireExisting?: boolean }) {
+    const params = {
       eventId: event.id,
       title: event.title,
       description: event.description ?? null,
@@ -59,98 +51,75 @@ export class OntologyService {
       endTime: this.toDateTimeString(event.endTime ?? null),
       createdAt: this.toDateTimeString(event.createdAt) ?? new Date().toISOString(),
       updatedAt: this.toDateTimeString(event.updatedAt) ?? new Date().toISOString(),
-    });
+    };
+
+    if (options?.requireExisting) {
+      const cypher = `
+        MATCH (e:Event { eventId: $eventId })
+        SET e.title = $title,
+            e.description = $description,
+            e.location = $location,
+            e.startTime = datetime($startTime),
+            e.endTime = CASE WHEN $endTime IS NULL THEN NULL ELSE datetime($endTime) END,
+            e.updatedAt = datetime($updatedAt)
+        RETURN e
+      `;
+      const result = await this.neo4j.run(cypher, params);
+      if (!result.records.length) {
+        throw new NotFoundException(`Event node (${event.id}) not found in Neo4j for update`);
+      }
+      return result;
+    }
+
+    const cypher = `
+      MERGE (e:Event { eventId: $eventId })
+      ON CREATE SET e.createdAt = datetime($createdAt)
+      SET e.title = $title,
+          e.description = $description,
+          e.location = $location,
+          e.startTime = datetime($startTime),
+          e.endTime = CASE WHEN $endTime IS NULL THEN NULL ELSE datetime($endTime) END,
+          e.updatedAt = datetime($updatedAt)
+      RETURN e
+    `;
+    return this.neo4j.run(cypher, params);
   }
 
-  async upsertConcept(
-    name: string,
-    type: string,
-    opts?: { externalId?: string; source?: string },
+  /**
+   * canonical_en (Concept.name) 기반 upsert
+   * - MERGE key는 name 단 하나 (결정론)
+   * - type은 라벨(Label:Activity 등)을 매핑한 ConceptType(LabelClass)만 사용
+   * - provenance는 provenance로만 저장 (덮어쓸지 append할지는 정책인데, 지금은 "최신값"으로 둠)
+   */
+  async upsertConceptWithProps(
+    name: string, // canonical_en
+    type: ConceptType,
+    props?: Record<string, any>,
   ) {
     const cypher = `
-      MERGE (c:Concept:${type} { name: $name })
+      MERGE (c:Concept:${type} { name: $name, type: $type })
       ON CREATE SET
-        c.createdAt = datetime()
-      SET
-        c.externalId = COALESCE($externalId, c.externalId),
+        c.createdAt = datetime(),
         c.source = COALESCE($source, c.source),
         c.updatedAt = datetime()
+      ON MATCH SET
+        c.source = COALESCE($source, c.source),
+        c.updatedAt = datetime()
+      SET c += $props
       RETURN c
     `;
-
-    await this.neo4j.run(cypher, {
+    return this.neo4j.run(cypher, {
       name,
-      externalId: opts?.externalId ?? null,
-      source: opts?.source ?? null,
+      type,
+      source: props?.source ?? 'ml',
+      props: props ?? {},
     });
-  }
-
-  async expandConceptFromWikidata(name: string, type: string) {
-    // 1) Concept 이미 externalId가 있다면, 재확장하지 않도록 early return (optional)
-    const checkCypher = `
-      MATCH (c:Concept:${type} {name: $name})
-      RETURN c.externalId AS externalId
-    `;
-    const result = await this.neo4j.run(checkCypher, { name });
-    const existing = result.records?.[0]?.get?.('externalId');
-    if (existing) {
-      // 이미 Wikidata 연동된 Concept라면 확장 스킵
-      return;
-    }
-
-    // 2) Wikidata 검색
-    const entity = await this.wikidata.searchEntity(name);
-    if (!entity) return;
-
-    const qid = entity.id; // Q번호
-
-    // 3) Concept 노드에 externalId / source 업데이트
-    await this.upsertConcept(name, type, {
-      externalId: qid,
-      source: 'wikidata',
-    });
-
-    // 4) 이웃 가져오기
-    const neighbors = await this.wikidata.fetchNeighbors(qid);
-    if (!neighbors.length) return;
-
-    // 5) 이웃 Concept upsert + 관계 생성
-    for (const nb of neighbors) {
-      const neighborType = 'Concept'; // 일단 타입은 generic, 나중에 분류 가능
-
-      await this.upsertConcept(nb.label, neighborType, {
-        externalId: nb.id,
-        source: 'wikidata',
-      });
-
-      let relation: RelationValue;
-      if (nb.relation === 'INSTANCE_OF') relation = RELATIONS.INSTANCE_OF;
-      else if (nb.relation === 'SUBCLASS_OF') relation = RELATIONS.SUBCLASS_OF;
-      else if (nb.relation === 'HAS_PART') relation = RELATIONS.HAS_PART;
-      else relation = RELATIONS.HAS_GOAL;
-
-      await this.linkConceptToConcept(name, nb.label, relation);
-    }
-  }
-
-  async linkConceptToConcept(
-    fromName: string,
-    toName: string,
-    relation: RelationValue,
-  ) {
-    const cypher = `
-      MATCH (c1:Concept {name: $fromName})
-      MATCH (c2:Concept {name: $toName})
-      MERGE (c1)-[r:${relation}]->(c2)
-      RETURN r
-    `;
-    await this.neo4j.run(cypher, { fromName, toName });
   }
 
   async linkEventToConcept(eventId: string, conceptName: string) {
     const cypher = `
-      MATCH (e:Event {eventId: $eventId})
-      MATCH (c:Concept {name: $conceptName})
+      MATCH (e:Event { eventId: $eventId })
+      MATCH (c:Concept { name: $conceptName })
       MERGE (e)-[:${RELATIONS.MENTIONS}]->(c)
     `;
     await this.neo4j.run(cypher, { eventId, conceptName });
@@ -158,8 +127,8 @@ export class OntologyService {
 
   async linkUserToConcept(userId: string, conceptName: string) {
     const cypher = `
-      MATCH (u:User {id: $userId})
-      MATCH (c:Concept {name: $conceptName})
+      MATCH (u:User { id: $userId })
+      MATCH (c:Concept { name: $conceptName })
       MERGE (u)-[:${RELATIONS.RELATED_TO}]->(c)
     `;
     await this.neo4j.run(cypher, { userId, conceptName });
@@ -167,8 +136,8 @@ export class OntologyService {
 
   async linkUserToEvent(userId: string, eventId: string) {
     const cypher = `
-      MATCH (u:User {id: $userId})
-      MATCH (e:Event {eventId: $eventId})
+      MATCH (u:User { id: $userId })
+      MATCH (e:Event { eventId: $eventId })
       MERGE (u)-[:${RELATIONS.OWNS_EVENT}]->(e)
     `;
     await this.neo4j.run(cypher, { userId, eventId });
@@ -176,7 +145,7 @@ export class OntologyService {
 
   async clearEventConceptLinks(eventId: string) {
     const cypher = `
-      MATCH (e:Event {eventId: $eventId})-[rel:MENTIONS]->(:Concept)
+      MATCH (e:Event { eventId: $eventId })-[rel:${RELATIONS.MENTIONS}]->(:Concept)
       DELETE rel
     `;
     await this.neo4j.run(cypher, { eventId });
@@ -184,37 +153,81 @@ export class OntologyService {
 
   async removeEvent(eventId: string) {
     const cypher = `
-      MATCH (e:Event {eventId: $eventId})
+      MATCH (e:Event { eventId: $eventId })
       DETACH DELETE e
     `;
     await this.neo4j.run(cypher, { eventId });
   }
 
-  async processEventOntology(user: User, event: Event, ner: NerResponseDto) {
-    const entities = ner?.entities ?? [];
+  /**
+   * 핵심 파이프라인:
+   * - ner.mentions 에서 label 허용되는 것만
+   * - Concept.name은 무조건 canonical.en
+   * - Concept upsert 후 Event/User 연결
+   * - 그리고 ExpansionService로 “name 기준 1회 확장” 트리거
+   */
+  async processEventOntology(
+    user: User,
+    event: Event,
+    ner: NerResponseDto,
+    options?: { mode?: 'create' | 'update' },
+  ) {
+    const mentions = ner?.mentions ?? [];
+    const mode = options?.mode ?? 'create';
 
-    await this.upsertUser(user);
-    await this.upsertEvent(event);
-    await this.linkUserToEvent(user.id, event.id);
-    await this.clearEventConceptLinks(event.id);
+    await Promise.all([
+      this.upsertUser(user),
+      this.upsertEvent(event, { requireExisting: mode === 'update' }),
+    ]);
+    await Promise.all([this.linkUserToEvent(user.id, event.id), this.clearEventConceptLinks(event.id)]);
 
-    for (const ent of entities) {
-      const conceptName = ent.text?.trim();
-      if (!conceptName) {
-        continue;
+    const conceptMap = new Map<
+      string,
+      {
+        conceptType: ConceptType;
+        provenance: string | null;
       }
-      const conceptType = NER_TO_CONCEPT_TYPE[ent.label] ?? 'Concept';
-      await this.upsertConcept(conceptName, conceptType);
-      await this.linkEventToConcept(event.id, conceptName);
-      await this.linkUserToConcept(user.id, conceptName);
+    >();
 
-      // Wikidata 확장 (best-effort)
-      try {
-        await this.expandConceptFromWikidata(conceptName, conceptType);
-      } catch (e) {
-        // 절대 메인 플로우 깨지지 않게 로그만
-        console.error('Wikidata expansion failed', e);
-      }
+    for (const m of mentions) {
+      const label = m?.ner?.label;
+      const mappedType = NER_TO_CONCEPT_TYPE[label] ?? 'None';
+      if (mappedType === 'None') continue;
+
+      const canonicalName = m?.canonical?.en?.trim();
+      if (!canonicalName || conceptMap.has(canonicalName)) continue;
+
+      conceptMap.set(canonicalName, {
+        conceptType: mappedType as ConceptType,
+        provenance: m?.surface?.trim() ?? null,
+      });
+    }
+
+    const concepts = Array.from(conceptMap.entries()).map(([canonicalName, value]) => ({
+      canonicalName,
+      conceptType: value.conceptType,
+      provenance: value.provenance,
+    }));
+
+    await Promise.all(
+      concepts.map(async ({ canonicalName, conceptType, provenance }) => {
+        await this.upsertConceptWithProps(canonicalName, conceptType, {
+          provenance,
+          source: 'ml',
+        });
+        await Promise.all([
+          this.linkEventToConcept(event.id, canonicalName),
+          this.linkUserToConcept(user.id, canonicalName),
+        ]);
+      }),
+    );
+
+    for (const { canonicalName } of concepts) {
+      void this.expansionService.expandConceptByName(canonicalName).catch((e: any) => {
+        this.logger.warn(
+          `Wikidata expansion skipped for "${canonicalName}": ${e?.message ?? e}`,
+        );
+      });
     }
   }
 }

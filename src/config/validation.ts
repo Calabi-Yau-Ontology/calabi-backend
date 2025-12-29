@@ -45,6 +45,9 @@ class EnvironmentVariables {
   @IsOptional()
   @IsString()
   WIKIDATA_LANGUAGE?: string;
+  @IsOptional()
+  @IsString()
+  WIKIDATA_MAX_NEIGHBORS?: string;
 }
 
 export function validate(config: Record<string, unknown>) {

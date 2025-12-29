@@ -2,96 +2,107 @@ import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
-import { AxiosError } from 'axios';
-
-type WikidataSearchResult = {
-  id: string;       // Q번호 (예: "Q12345")
-  label: string;    // 라벨
-  description?: string;
-};
-
-type WikidataNeighbor = {
-  id: string;           // Q번호
-  label: string;
-  relation: 'INSTANCE_OF' | 'SUBCLASS_OF' | 'HAS_PART' | 'HAS_GOAL';
-};
+import { AxiosRequestConfig } from 'axios';
+import {
+  PID_TO_REL,
+  WikidataNeighbor,
+  WikidataSearchItem,
+} from './wikidata.types';
 
 @Injectable()
 export class WikidataService {
   private readonly logger = new Logger(WikidataService.name);
+
   private readonly sparqlEndpoint: string;
   private readonly searchEndpoint: string;
-  private readonly language: string;
+  private readonly maxNeighbors: number;
 
   constructor(
     private readonly http: HttpService,
-    private readonly configService: ConfigService,
+    private readonly config: ConfigService,
   ) {
-    const cfg = this.configService.get('wikidata');
-    this.sparqlEndpoint = cfg.sparqlEndpoint;
-    this.searchEndpoint = cfg.searchEndpoint;
-    this.language = cfg.language || 'ko,en';
+    this.sparqlEndpoint =
+      this.config.get<string>('WIKIDATA_SPARQL_ENDPOINT') ??
+      'https://query.wikidata.org/sparql';
+    this.searchEndpoint =
+      this.config.get<string>('WIKIDATA_SEARCH_ENDPOINT') ??
+      'https://www.wikidata.org/w/api.php';
+
+    this.maxNeighbors = Number(this.config.get('WIKIDATA_MAX_NEIGHBORS') ?? 200);
   }
 
   /**
-   * 텍스트(label)로 Wikidata 엔티티 검색 → QID 하나 반환
+   * canonical_en 기반 검색 (language=en 고정)
    */
-  async searchEntity(label: string): Promise<WikidataSearchResult | null> {
+  async searchByEnglishLabel(query: string, limit = 5): Promise<WikidataSearchItem[]> {
+    const q = query.trim();
+    if (!q) return [];
+
     const params = {
       action: 'wbsearchentities',
       format: 'json',
-      language: this.language.split(',')[0],
-      search: label,
-      limit: 1,
-      origin: '*',
+      language: 'en',
+      uselang: 'en',
+      search: q,
+      limit,
     };
 
     try {
-      const res$ = this.http.get(this.searchEndpoint, { params });
+      // console.log('Wikidata search params:', params);
+      const res$ = this.http.get(this.searchEndpoint, {
+        params,
+      });
       const { data } = await firstValueFrom(res$);
 
-      if (!data?.search?.length) return null;
-
-      const first = data.search[0];
-      return {
-        id: first.id, // "Qxxxx"
-        label: first.label,
-        description: first.description,
-      };
-    } catch (e) {
-      const err = e as AxiosError;
-      this.logger.error(`Wikidata search failed: ${err.message}`, err.stack);
-      return null;
+      const items = (data?.search ?? []) as any[];
+      return items
+        .map((it) => ({
+          id: String(it.id),
+          label: String(it.label ?? ''),
+          description: it.description ? String(it.description) : undefined,
+        }))
+        .filter((it) => it.id && it.label);
+    } catch (e: any) {
+      this.logger.error(`Wikidata search failed: ${e?.message ?? e}`, e?.stack);
+      return [];
     }
   }
 
   /**
-   * 주어진 QID에 대해 instance of / subclass of / has part / has goal 이웃을 가져온다.
+   * qid 기준 neighbors fetch
+   * - 최대 maxNeighbors로 제한
    */
   async fetchNeighbors(qid: string): Promise<WikidataNeighbor[]> {
-    const query = `
+    const fromQid = qid.trim();
+    if (!/^Q\d+$/.test(fromQid)) return [];
+
+    const sparql = `
       SELECT ?property ?propertyLabel ?value ?valueLabel WHERE {
-        VALUES ?item { wd:${qid} }
-        ?item ?p ?value .
-        ?property wikibase:directClaim ?p .
-        VALUES ?property { wd:P31 wd:P279 wd:P527 wd:P3712 }
-        SERVICE wikibase:label { bd:serviceParam wikibase:language "${this.language}" . }
-      }
+          VALUES ?item { wd:${fromQid} }
+          ?item ?p ?value .
+          ?property wikibase:directClaim ?p .
+          VALUES ?property { wd:P31 wd:P279 wd:P527 wd:P3712 }
+          SERVICE wikibase:label { bd:serviceParam wikibase:language "en" . }
+        }
+      LIMIT ${this.maxNeighbors}
     `;
 
-    const params = {
-      query,
-      format: 'json',
-    };
-
     try {
-      const res$ = this.http.get(this.sparqlEndpoint, { params });
+      // console.log('Wikidata SPARQL query:', sparql);
+      const res$ = this.http.get(this.sparqlEndpoint, {
+        params: {
+          format: 'json',
+          query: sparql,
+        },
+      });
+
       const { data } = await firstValueFrom(res$);
-      const results = data?.results?.bindings ?? [];
+      // console.log('Wikidata SPARQL data:', data);
+      const bindings = data?.results?.bindings ?? [];
 
       const neighbors: WikidataNeighbor[] = [];
 
-      for (const row of results) {
+      for (const row of bindings) {
         const propertyIri: string = row.property.value; // e.g. "http://www.wikidata.org/prop/direct/P31"
         const valueIri: string = row.value.value;       // e.g. "http://www.wikidata.org/entity/Q12345"
         const valueLabel: string = row.valueLabel?.value ?? '';
@@ -101,7 +112,7 @@ export class WikidataService {
 
         if (!neighborQid || !valueLabel) continue;
 
-        let relation: WikidataNeighbor['relation'] | null = null;
+        let relation: WikidataNeighbor['rel'] | null = null;
         if (pid === 'P31') relation = 'INSTANCE_OF';
         else if (pid === 'P279') relation = 'SUBCLASS_OF';
         else if (pid === 'P527') relation = 'HAS_PART';
@@ -110,16 +121,15 @@ export class WikidataService {
         if (!relation) continue;
 
         neighbors.push({
-          id: neighborQid,
-          label: valueLabel,
-          relation,
+          neighborQid: neighborQid,
+          neighborLabel: valueLabel,
+          rel: relation,
         });
       }
 
       return neighbors;
-    } catch (e) {
-      const err = e as AxiosError;
-      this.logger.error(`Wikidata neighbors fetch failed: ${err.message}`, err.stack);
+    } catch (e: any) {
+      this.logger.error(`Wikidata SPARQL failed: ${e?.message ?? e}`, e?.stack);
       return [];
     }
   }

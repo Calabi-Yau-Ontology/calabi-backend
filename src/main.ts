@@ -16,6 +16,12 @@ async function bootstrap() {
     }),
   );
 
+  app.enableCors({
+    origin: true,
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    credentials: true,
+  });
+
   app.useGlobalInterceptors(new TransformInterceptor());
 
   await app.listen(process.env.PORT ?? 4000);

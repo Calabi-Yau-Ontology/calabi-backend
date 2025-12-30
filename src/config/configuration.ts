@@ -24,10 +24,6 @@ export default () => ({
     clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '',
     redirectUri: process.env.GOOGLE_REDIRECT_URI ?? '',
   },
-  frontend: {
-    baseUrl: process.env.FRONTEND_BASE_URL ?? 'http://localhost:3000',
-    authRedirectPath: process.env.FRONTEND_AUTH_REDIRECT_PATH ?? '/calendar',
-  },
   ml: {
     baseUrl: process.env.ML_BASE_URL ?? 'http://localhost:8000',
   },

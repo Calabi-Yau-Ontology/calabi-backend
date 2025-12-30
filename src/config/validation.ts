@@ -38,14 +38,6 @@ class EnvironmentVariables {
   @IsString()
   GOOGLE_REDIRECT_URI!: string;
 
-  @IsOptional()
-  @IsString()
-  FRONTEND_BASE_URL?: string;
-
-  @IsOptional()
-  @IsString()
-  FRONTEND_AUTH_REDIRECT_PATH?: string;
-
   @IsString()
   WIKIDATA_SPARQL_ENDPOINT?: string;
   @IsString()

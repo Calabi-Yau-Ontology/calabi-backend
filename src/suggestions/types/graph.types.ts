@@ -30,6 +30,7 @@ export type ConsistencyRecommendationRow = {
   canonicalName: string;
   conceptType?: ConceptType;
   inputSurface?: string | null;
+  inputSpan?: { start: number; end: number } | null;
   mostFrequent?: SurfaceRecommendationRowEntry;
   mostRecent?: SurfaceRecommendationRowEntry;
 };
@@ -37,4 +38,5 @@ export type ConsistencyRecommendationRow = {
 export type CanonicalMention = {
   canonicalName: string;
   surface?: string | null;
+  span?: { start: number; end: number } | null;
 };

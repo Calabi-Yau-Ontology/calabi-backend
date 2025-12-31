@@ -212,6 +212,7 @@ export class SuggestionsService {
       map.set(canonicalName, {
         canonicalName,
         surface: mention?.surface?.trim() ?? null,
+        span: mention?.span ?? null,
       });
     }
 
@@ -248,6 +249,7 @@ export class SuggestionsService {
         canonicalName: item.canonicalName,
         conceptType: c.type,
         inputSurface: item.surface,
+        inputSpan: item.span,
         mostFrequent: { node: freq, rel: freqRel },
         mostRecent: { node: recent, rel: recentRel }
       } AS row
@@ -288,6 +290,7 @@ export class SuggestionsService {
       canonicalName: row.canonicalName,
       conceptType: row.conceptType ?? undefined,
       inputSurface: row.inputSurface ?? null,
+      span: row.inputSpan ?? null,
       mostFrequent,
       mostRecent,
     };

@@ -13,6 +13,7 @@ export class ConsistencyRecommendationDto {
   canonicalName!: string;
   conceptType?: ConceptType;
   inputSurface?: string | null;
+  span?: { start: number; end: number } | null;
   mostRecent?: SurfaceRecommendationDto | null;
   mostFrequent?: SurfaceRecommendationDto | null;
 }

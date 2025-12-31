@@ -22,9 +22,9 @@ export class OntologyService {
     private readonly expansionService: ExpansionService,
   ) {}
 
-  private toDateTimeString(date?: Date | null): string | null {
-    return date ? date.toISOString() : null;
-  }
+  // ---------------------------------------------------------------------------
+  // Public upsert/link operations
+  // ---------------------------------------------------------------------------
 
   async upsertUser(user: User) {
     const cypher = `
@@ -274,9 +274,26 @@ export class OntologyService {
     const key = `${conceptType}::${conceptName}::${normalized}`;
     const now = new Date().toISOString();
 
+    const params = {
+      conceptName,
+      conceptType,
+      surface,
+      normalized,
+      key,
+      now,
+      userId,
+      eventId,
+    };
+
+    await this.upsertSurfaceFormNode(params);
+    await this.linkUserToSurfaceForm(params);
+  }
+
+  private async upsertSurfaceFormNode(
+    params: SurfaceFormParams,
+  ): Promise<void> {
     const cypher = `
       MATCH (c:Concept { name: $conceptName, type: $conceptType })
-      MATCH (u:User { id: $userId })
       MERGE (sf:SurfaceForm { key: $key })
       ON CREATE SET
         sf.value = $surface,
@@ -297,6 +314,16 @@ export class OntologyService {
       MERGE (sf)-[r:${RELATIONS.SURFACE_OF}]->(c)
       ON CREATE SET r.createdAt = datetime($now)
       SET r.updatedAt = datetime($now)
+    `;
+    await this.neo4j.run(cypher, params);
+  }
+
+  private async linkUserToSurfaceForm(
+    params: SurfaceFormParams,
+  ): Promise<void> {
+    const cypher = `
+      MATCH (u:User { id: $userId })
+      MATCH (sf:SurfaceForm { key: $key })
       MERGE (u)-[us:${RELATIONS.USED_SURFACE}]->(sf)
       ON CREATE SET
         us.createdAt = datetime($now),
@@ -307,16 +334,25 @@ export class OntologyService {
         us.lastUsedAt = datetime($now),
         us.lastUsedEventId = $eventId
     `;
+    await this.neo4j.run(cypher, params);
+  }
 
-    await this.neo4j.run(cypher, {
-      conceptName,
-      conceptType,
-      surface,
-      normalized,
-      key,
-      now,
-      userId,
-      eventId,
-    });
+  // ---------------------------------------------------------------------------
+  // Utility helpers
+  // ---------------------------------------------------------------------------
+
+  private toDateTimeString(date?: Date | null): string | null {
+    return date ? date.toISOString() : null;
   }
 }
+
+type SurfaceFormParams = {
+  conceptName: string;
+  conceptType: ConceptType;
+  surface: string | null;
+  normalized: string;
+  key: string;
+  now: string;
+  userId: string;
+  eventId: string;
+};

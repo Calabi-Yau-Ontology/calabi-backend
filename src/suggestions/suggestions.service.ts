@@ -50,6 +50,10 @@ export class SuggestionsService {
     this.baseUrl = mlConfig?.baseUrl ?? '';
   }
 
+  // ---------------------------------------------------------------------------
+  // Public API
+  // ---------------------------------------------------------------------------
+
   /**
    * 실시간 자동완성: 입력 fragment로 SurfaceForm prefix를 조회한다.
    */
@@ -58,22 +62,12 @@ export class SuggestionsService {
     fragment: string,
     limit?: number,
   ): Promise<AutocompleteResponseDto> {
-    const normalizedFragment = normalizeSurfaceForm(fragment?.trim() ?? '');
+    const normalizedFragment = this.normalizeSurfaceInput(fragment);
     if (!normalizedFragment) {
       return { suggestions: [] };
     }
 
-    const numericLimit =
-      typeof limit === 'number'
-        ? limit
-        : Number.parseInt(String(limit ?? ''), 10);
-    const limitCandidate = Number.isFinite(numericLimit)
-      ? numericLimit
-      : AUTOCOMPLETE_DEFAULT_LIMIT;
-    const maxLimit = Math.max(
-      1,
-      Math.min(Math.floor(limitCandidate), AUTOCOMPLETE_MAX_LIMIT),
-    );
+    const maxLimit = this.resolveAutocompleteLimit(limit);
     const cypher = `
       MATCH (u:User { id: $userId })-[usage:${RELATIONS.USED_SURFACE}]->(sf:SurfaceForm)
       MATCH (sf)-[:${RELATIONS.SURFACE_OF}]->(c:Concept)
@@ -89,21 +83,17 @@ export class SuggestionsService {
       limit: limitParam,
     });
 
-    const suggestions: AutocompleteSuggestionDto[] = res.records.map(
-      (record: Neo4jRecord) => {
-        const surfaceNode = record.get('sf') as Node;
-        const conceptNode = (record.get('concept') as Node | null) ?? null;
-        const rel = (record.get('usageRel') as Relationship | null) ?? null;
-        return this.mapAutocompleteRecord(surfaceNode, conceptNode, rel);
-      },
+    const suggestions = res.records.map((record: Neo4jRecord) =>
+      this.mapAutocompleteRecord(
+        record.get('sf') as Node,
+        (record.get('concept') as Node | null) ?? null,
+        (record.get('usageRel') as Relationship | null) ?? null,
+      ),
     );
 
-    const filtered = suggestions.filter((item) => {
-      const suggestionNorm = normalizeSurfaceForm(item.surface);
-      return suggestionNorm !== normalizedFragment;
-    });
-
-    return { suggestions: filtered };
+    return {
+      suggestions: this.excludeMatchingSurface(suggestions, normalizedFragment),
+    };
   }
 
   /**
@@ -137,20 +127,7 @@ export class SuggestionsService {
       errors: ner.errors,
     };
   }
-
-  // async runNer(text: RunNerDto): Promise<NerResponseDto> {
-  //   const url = `${this.baseUrl}/nlp/ner`;
-
-  //   try {
-  //     const response$ = this.httpService.post(url, text);
-  //     const { data } = await firstValueFrom(response$);
-  //     return data;
-  //   } catch (error) {
-  //     const err = error as AxiosError;
-  //     this.logger.error(`NER request failed: ${err.message}`, err.stack);
-  //     return { entities: [] };
-  //   }
-  // }
+  
   async runNer(text: RunNerDto): Promise<NerResponseDto> {
     const url = `${this.baseUrl}/nlp/ner`;
 
@@ -186,6 +163,10 @@ export class SuggestionsService {
     this.nerCache.delete(token);
     return entry;
   }
+
+  // ---------------------------------------------------------------------------
+  // Canonical mention & Neo4j query helpers
+  // ---------------------------------------------------------------------------
 
   private extractCanonicalMentions(ner: NerResponseDto): CanonicalMention[] {
     const mentions = ner?.mentions ?? [];
@@ -249,6 +230,10 @@ export class SuggestionsService {
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Mapping helpers
+  // ---------------------------------------------------------------------------
+
   private mapConsistencyRow(
     row: ConsistencyRecommendationRow,
   ): ConsistencyRecommendationDto | null {
@@ -283,28 +268,16 @@ export class SuggestionsService {
     conceptNode: Node | null,
     usageRel: Relationship | null,
   ): AutocompleteSuggestionDto {
-    const surfaceProps = this.getNodeProperties(surfaceNode);
-    const conceptProps = this.getNodeProperties(conceptNode);
-    const usageProps = this.getRelationshipProperties(usageRel);
-
-    const surfaceValue = this.asString(surfaceProps['value']) ?? '';
-    const conceptName =
-      this.asString(conceptProps['name']) ??
-      this.asString(surfaceProps['conceptName']);
-    const conceptType =
-      this.asConceptType(conceptProps['type']) ??
-      this.asConceptType(surfaceProps['conceptType']);
+    const surface = this.extractSurfaceForm(surfaceNode);
+    const concept = this.extractConcept(conceptNode);
+    const usage = this.extractUsedSurface(usageRel);
 
     return {
-      surface: surfaceValue,
-      conceptName,
-      conceptType,
-      lastUsedAt:
-        this.toIsoString(usageProps['lastUsedAt']) ??
-        this.toIsoString(surfaceProps['lastUsedAt']),
-      usageCount:
-        this.toNumber(usageProps['usageCount']) ??
-        this.toNumber(surfaceProps['usageCount']),
+      surface: surface.value ?? '',
+      conceptName: concept.name ?? surface.conceptName,
+      conceptType: concept.type ?? surface.conceptType,
+      lastUsedAt: usage.lastUsedAt ?? surface.lastUsedAt,
+      usageCount: usage.usageCount ?? surface.usageCount,
     };
   }
 
@@ -313,49 +286,78 @@ export class SuggestionsService {
     reason: RecommendationReason,
     normalizedInput?: string,
   ): SurfaceRecommendationDto | null {
-    const node = entry?.node ?? null;
-    const rel = entry?.rel ?? null;
-    if (!node || !rel) return null;
-    const props = this.getNodeProperties(node);
-    const relProps = this.getRelationshipProperties(rel);
-    const surfaceValue = this.asString(props['value']) ?? '';
-    const normalizedSurface = normalizeSurfaceForm(surfaceValue);
+    const surface = this.extractSurfaceForm(entry?.node ?? null);
+    const usage = this.extractUsedSurface(entry?.rel ?? null);
+    if (!surface.value || !usage.exists) return null;
+
+    const normalizedSurface = this.normalizeSurfaceInput(surface.value);
     if (normalizedInput && normalizedSurface === normalizedInput) {
       return null;
     }
 
     return {
       reason,
-      surface: surfaceValue,
-      usageCount:
-        this.toNumber(relProps['usageCount']) ??
-        this.toNumber(props['usageCount']),
-      lastUsedAt:
-        this.toIsoString(relProps['lastUsedAt']) ??
-        this.toIsoString(props['lastUsedAt']),
+      surface: surface.value,
+      usageCount: usage.usageCount ?? surface.usageCount,
+      lastUsedAt: usage.lastUsedAt ?? surface.lastUsedAt,
     };
   }
 
-  private getNodeProperties(
-    node: Node | null | undefined,
-  ): Record<string, unknown> {
-    if (!node) return {};
-    const props = node.properties;
-    if (props && typeof props === 'object') {
-      return props as Record<string, unknown>;
-    }
-    return {};
+  private extractSurfaceForm(node: Node | null): SurfaceFormData {
+    if (!node) return SurfaceFormDefaults;
+    const props = node.properties ?? {};
+    return {
+      value: this.asString(props['value']),
+      normalized: this.asString(props['normalized']),
+      conceptName: this.asString(props['conceptName']),
+      conceptType: this.asConceptType(props['conceptType']),
+      usageCount: this.toNumber(props['usageCount']),
+      lastUsedAt: this.toIsoString(props['lastUsedAt']),
+    };
   }
 
-  private getRelationshipProperties(
-    rel: Relationship | null | undefined,
-  ): Record<string, unknown> {
-    if (!rel) return {};
-    const props = rel.properties;
-    if (props && typeof props === 'object') {
-      return props as Record<string, unknown>;
-    }
-    return {};
+  private extractConcept(node: Node | null): ConceptData {
+    if (!node) return ConceptDefaults;
+    const props = node.properties ?? {};
+    return {
+      name: this.asString(props['name']),
+      type: this.asConceptType(props['type']),
+    };
+  }
+
+  private extractUsedSurface(rel: Relationship | null): UsedSurfaceData {
+    if (!rel) return UsedSurfaceDefaults;
+    const props = rel.properties ?? {};
+    return {
+      exists: true,
+      usageCount: this.toNumber(props['usageCount']),
+      lastUsedAt: this.toIsoString(props['lastUsedAt']),
+    };
+  }
+
+  private excludeMatchingSurface(
+    suggestions: AutocompleteSuggestionDto[],
+    normalizedInput: string,
+  ): AutocompleteSuggestionDto[] {
+    if (!normalizedInput) return suggestions;
+    return suggestions.filter(
+      (item) => this.normalizeSurfaceInput(item.surface) !== normalizedInput,
+    );
+  }
+
+  private normalizeSurfaceInput(value: string | null | undefined): string {
+    return normalizeSurfaceForm(value?.trim() ?? '');
+  }
+
+  private resolveAutocompleteLimit(limit?: number): number {
+    const numeric =
+      typeof limit === 'number'
+        ? limit
+        : Number.parseInt(String(limit ?? ''), 10);
+    const candidate = Number.isFinite(numeric)
+      ? numeric
+      : AUTOCOMPLETE_DEFAULT_LIMIT;
+    return Math.max(1, Math.min(Math.floor(candidate), AUTOCOMPLETE_MAX_LIMIT));
   }
 
   private asString(value: unknown): string | undefined {
@@ -475,3 +477,27 @@ type CachedNerEntry = {
   ner: NerResponseDto;
   createdAt: number;
 };
+
+type SurfaceFormData = {
+  value?: string;
+  normalized?: string;
+  conceptName?: string;
+  conceptType?: ConceptType;
+  usageCount?: number;
+  lastUsedAt?: string | null;
+};
+
+type ConceptData = {
+  name?: string;
+  type?: ConceptType;
+};
+
+type UsedSurfaceData = {
+  exists: boolean;
+  usageCount?: number;
+  lastUsedAt?: string | null;
+};
+
+const SurfaceFormDefaults: SurfaceFormData = {};
+const ConceptDefaults: ConceptData = {};
+const UsedSurfaceDefaults: UsedSurfaceData = { exists: false };

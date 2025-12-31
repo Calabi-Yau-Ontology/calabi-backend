@@ -35,9 +35,7 @@ export class GoogleStrategy extends PassportStrategy(Strategy) {
       .trim();
 
     const resolvedName =
-      displayName ??
-      (fallbackName || undefined) ??
-      emails[0].value;
+      displayName ?? (fallbackName || undefined) ?? emails[0].value;
 
     const user: GoogleProfile = {
       email: emails[0].value,

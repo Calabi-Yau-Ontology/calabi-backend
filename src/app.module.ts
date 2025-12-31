@@ -19,8 +19,8 @@ import { HealthModule } from './health/health.module';
         process.env.NODE_ENV === 'dev'
           ? '.env.dev'
           : process.env.NODE_ENV === 'prod'
-          ? '.env.prod'
-          : '.env.test',
+            ? '.env.prod'
+            : '.env.test',
       load: [configuration],
       validate,
     }),

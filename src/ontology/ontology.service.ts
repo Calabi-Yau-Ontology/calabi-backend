@@ -176,7 +176,10 @@ export class OntologyService {
       this.upsertUser(user),
       this.upsertEvent(event, { requireExisting: mode === 'update' }),
     ]);
-    await Promise.all([this.linkUserToEvent(user.id, event.id), this.clearEventConceptLinks(event.id)]);
+    await Promise.all([
+      this.linkUserToEvent(user.id, event.id),
+      this.clearEventConceptLinks(event.id),
+    ]);
 
     const conceptMap = new Map<
       string,

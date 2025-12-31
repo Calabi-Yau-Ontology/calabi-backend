@@ -16,7 +16,7 @@ export class ConceptService {
   constructor(private readonly neo4j: Neo4jService) {}
 
   async upsertConcept(params: {
-    name: string;          // canonical_en
+    name: string; // canonical_en
     type: ConceptType;
     source: 'user' | 'wikidata';
   }): Promise<ConceptNode> {

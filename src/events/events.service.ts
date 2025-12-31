@@ -75,12 +75,11 @@ export class EventsService {
 
     if (dto.title !== undefined) event.title = dto.title;
     if (dto.description !== undefined) event.description = dto.description;
-    if (dto.startTime !== undefined)
-      event.startTime = new Date(dto.startTime);
+    if (dto.startTime !== undefined) event.startTime = new Date(dto.startTime);
     if (dto.endTime !== undefined)
       event.endTime = dto.endTime ? new Date(dto.endTime) : null;
     if (dto.location !== undefined) event.location = dto.location;
-    
+
     // return this.eventsRepo.save(event);
     const saved = await this.eventsRepo.save(event);
 
@@ -98,10 +97,16 @@ export class EventsService {
     return { deleted: true };
   }
 
-  private triggerOntologyProcessing(user: User, event: Event, mode: 'create' | 'update'): void {
+  private triggerOntologyProcessing(
+    user: User,
+    event: Event,
+    mode: 'create' | 'update',
+  ): void {
     const owner = event.user ?? user;
     if (!owner) {
-      this.logger.warn(`Skip ontology processing for event ${event.id}: missing user context`);
+      this.logger.warn(
+        `Skip ontology processing for event ${event.id}: missing user context`,
+      );
       return;
     }
 
@@ -112,9 +117,14 @@ export class EventsService {
         const nerResult = await this.suggestionsService.runNer({
           text,
         });
-        await this.ontologyService.processEventOntology(owner, event, nerResult, {
-          mode,
-        });
+        await this.ontologyService.processEventOntology(
+          owner,
+          event,
+          nerResult,
+          { 
+            mode
+          },
+        );
       } catch (error) {
         const err = error as Error;
         this.logger.error(

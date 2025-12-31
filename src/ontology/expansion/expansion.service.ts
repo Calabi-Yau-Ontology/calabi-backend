@@ -19,7 +19,9 @@ export class ExpansionService {
     private readonly wikidata: WikidataService,
   ) {}
 
-  async expandConceptByName(canonicalName: string): Promise<{ expanded: boolean; reason: string }> {
+  async expandConceptByName(
+    canonicalName: string,
+  ): Promise<{ expanded: boolean; reason: string }> {
     const name = canonicalName.trim();
     if (!name) return { expanded: false, reason: 'empty_name' };
 
@@ -28,7 +30,8 @@ export class ExpansionService {
     if (!concept) return { expanded: false, reason: 'concept_not_found' };
 
     // 2) guard: expandedAt 있으면 재확장 금지
-    if (concept.wikidataExpandedAt) return { expanded: false, reason: 'already_expanded' };
+    if (concept.wikidataExpandedAt)
+      return { expanded: false, reason: 'already_expanded' };
 
     // 3) qid 확보
     let qid = concept.wikidataQid?.trim() ?? '';

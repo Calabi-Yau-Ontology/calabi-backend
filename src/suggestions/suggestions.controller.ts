@@ -18,8 +18,12 @@ export class SuggestionsController {
 
   @UseGuards(JwtAuthGuard)
   @Get('autocomplete')
-  async autocomplete(@Query() dto: AutocompleteRequestDto) {
+  async autocomplete(
+    @Request() req: { user: { id: string } },
+    @Query() dto: AutocompleteRequestDto,
+  ) {
     return this.suggestionsService.getRealtimeAutocomplete(
+      req.user.id,
       dto.fragment,
       dto.limit,
     );

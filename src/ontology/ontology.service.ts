@@ -3,11 +3,15 @@ import { Neo4jService } from 'src/neo4j/neo4j.service';
 import { Event } from 'src/events/entities/event.entity';
 import { User } from 'src/users/entities/user.entity';
 import { NerResponseDto } from 'src/suggestions/dto/ner-response.dto';
+import { normalizeSurfaceForm } from 'src/common/utils/text-normalize';
 
-import { ConceptType, NER_TO_CONCEPT_TYPE, isAllowedNerLabel } from './constants/concept.types';
+import {
+  ConceptType,
+  NER_TO_CONCEPT_TYPE,
+  isAllowedNerLabel,
+} from './constants/concept.types';
 import { RELATIONS } from './constants/relations';
 import { ExpansionService } from './expansion/expansion.service';
-import { normalizeSurfaceForm } from 'src/common/utils/text-normalize';
 
 @Injectable()
 export class OntologyService {
@@ -47,8 +51,10 @@ export class OntologyService {
       location: event.location ?? null,
       startTime: this.toDateTimeString(event.startTime),
       endTime: this.toDateTimeString(event.endTime ?? null),
-      createdAt: this.toDateTimeString(event.createdAt) ?? new Date().toISOString(),
-      updatedAt: this.toDateTimeString(event.updatedAt) ?? new Date().toISOString(),
+      createdAt:
+        this.toDateTimeString(event.createdAt) ?? new Date().toISOString(),
+      updatedAt:
+        this.toDateTimeString(event.updatedAt) ?? new Date().toISOString(),
     };
 
     if (options?.requireExisting) {
@@ -64,7 +70,9 @@ export class OntologyService {
       `;
       const result = await this.neo4j.run(cypher, params);
       if (!result.records.length) {
-        throw new NotFoundException(`Event node (${event.id}) not found in Neo4j for update`);
+        throw new NotFoundException(
+          `Event node (${event.id}) not found in Neo4j for update`,
+        );
       }
       return result;
     }
@@ -243,9 +251,11 @@ export class OntologyService {
     for (const { canonicalName } of concepts) {
       void this.expansionService
         .expandConceptByName(canonicalName)
-        .catch((e: any) => {
+        .catch((error: unknown) => {
+          const message =
+            error instanceof Error ? error.message : String(error);
           this.logger.warn(
-            `Wikidata expansion skipped for "${canonicalName}": ${e?.message ?? e}`,
+            `Wikidata expansion skipped for "${canonicalName}": ${message}`,
           );
         });
     }
@@ -266,6 +276,7 @@ export class OntologyService {
 
     const cypher = `
       MATCH (c:Concept { name: $conceptName, type: $conceptType })
+      MATCH (u:User { id: $userId })
       MERGE (sf:SurfaceForm { key: $key })
       ON CREATE SET
         sf.value = $surface,
@@ -286,6 +297,15 @@ export class OntologyService {
       MERGE (sf)-[r:${RELATIONS.SURFACE_OF}]->(c)
       ON CREATE SET r.createdAt = datetime($now)
       SET r.updatedAt = datetime($now)
+      MERGE (u)-[us:${RELATIONS.USED_SURFACE}]->(sf)
+      ON CREATE SET
+        us.createdAt = datetime($now),
+        us.usageCount = 0
+      SET
+        us.updatedAt = datetime($now),
+        us.usageCount = COALESCE(us.usageCount, 0) + 1,
+        us.lastUsedAt = datetime($now),
+        us.lastUsedEventId = $eventId
     `;
 
     await this.neo4j.run(cypher, {

@@ -9,6 +9,7 @@ import type {
   DateTime as Neo4jDateTime,
   Node,
   Record as Neo4jRecord,
+  Relationship,
 } from 'neo4j-driver';
 import { Neo4jService } from 'src/neo4j/neo4j.service';
 import { normalizeSurfaceForm } from 'src/common/utils/text-normalize';
@@ -53,11 +54,12 @@ export class SuggestionsService {
    * 실시간 자동완성: 입력 fragment로 SurfaceForm prefix를 조회한다.
    */
   async getRealtimeAutocomplete(
+    userId: string,
     fragment: string,
     limit?: number,
   ): Promise<AutocompleteResponseDto> {
-    const normalized = normalizeSurfaceForm(fragment?.trim() ?? '');
-    if (!normalized) {
+    const normalizedFragment = normalizeSurfaceForm(fragment?.trim() ?? '');
+    if (!normalizedFragment) {
       return { suggestions: [] };
     }
 
@@ -73,26 +75,35 @@ export class SuggestionsService {
       Math.min(Math.floor(limitCandidate), AUTOCOMPLETE_MAX_LIMIT),
     );
     const cypher = `
-      MATCH (sf:SurfaceForm)-[:${RELATIONS.SURFACE_OF}]->(c:Concept)
+      MATCH (u:User { id: $userId })-[usage:${RELATIONS.USED_SURFACE}]->(sf:SurfaceForm)
+      MATCH (sf)-[:${RELATIONS.SURFACE_OF}]->(c:Concept)
       WHERE sf.normalized STARTS WITH $normalized
-      RETURN sf AS sf, c AS concept
-      ORDER BY sf.lastUsedAt DESC, sf.updatedAt DESC
+      RETURN sf AS sf, c AS concept, usage AS usageRel
+      ORDER BY usage.lastUsedAt DESC, usage.updatedAt DESC, sf.updatedAt DESC
       LIMIT $limit
     `;
-    console.log('maxLimit:', maxLimit);
     const limitParam = neo4j.int(maxLimit);
-    console.log('limitParam:', limitParam);
-    const res = await this.neo4j.run(cypher, { normalized, limit: limitParam });
+    const res = await this.neo4j.run(cypher, {
+      normalized: normalizedFragment,
+      userId,
+      limit: limitParam,
+    });
 
     const suggestions: AutocompleteSuggestionDto[] = res.records.map(
       (record: Neo4jRecord) => {
         const surfaceNode = record.get('sf') as Node;
         const conceptNode = (record.get('concept') as Node | null) ?? null;
-        return this.mapAutocompleteRecord(surfaceNode, conceptNode);
+        const rel = (record.get('usageRel') as Relationship | null) ?? null;
+        return this.mapAutocompleteRecord(surfaceNode, conceptNode, rel);
       },
     );
 
-    return { suggestions };
+    const filtered = suggestions.filter((item) => {
+      const suggestionNorm = normalizeSurfaceForm(item.surface);
+      return suggestionNorm !== normalizedFragment;
+    });
+
+    return { suggestions: filtered };
   }
 
   /**
@@ -115,10 +126,10 @@ export class SuggestionsService {
       };
     }
 
-    const rows = await this.fetchConsistencyRows(canonicalMentions);
-    const results: ConsistencyRecommendationDto[] = rows.map((row) =>
-      this.mapConsistencyRow(row),
-    );
+    const rows = await this.fetchConsistencyRows(userId, canonicalMentions);
+    const results: ConsistencyRecommendationDto[] = rows
+      .map((row) => this.mapConsistencyRow(row))
+      .filter((row): row is ConsistencyRecommendationDto => row !== null);
 
     return {
       cacheToken,
@@ -197,38 +208,41 @@ export class SuggestionsService {
   }
 
   private async fetchConsistencyRows(
+    userId: string,
     items: CanonicalMention[],
   ): Promise<ConsistencyRecommendationRow[]> {
     if (!items.length) return [];
 
-    const relation = RELATIONS.SURFACE_OF;
+    const surfaceRel = RELATIONS.SURFACE_OF;
+    const usageRel = RELATIONS.USED_SURFACE;
     const cypher = `
+      MATCH (u:User { id: $userId })
       UNWIND $items AS item
       MATCH (c:Concept { name: item.canonicalName })
       CALL {
-        WITH c
-        MATCH (c)<-[:${relation}]-(freq:SurfaceForm)
-        RETURN freq
-        ORDER BY freq.usageCount DESC, freq.lastUsedAt DESC, freq.updatedAt DESC
+        WITH c, u
+        MATCH (u)-[freqRel:${usageRel}]->(freq:SurfaceForm)-[:${surfaceRel}]->(c)
+        RETURN freq, freqRel
+        ORDER BY freqRel.usageCount DESC, freqRel.lastUsedAt DESC, freq.updatedAt DESC
         LIMIT 1
       }
       CALL {
-        WITH c
-        MATCH (c)<-[:${relation}]-(recent:SurfaceForm)
-        RETURN recent
-        ORDER BY recent.lastUsedAt DESC, recent.updatedAt DESC
+        WITH c, u
+        MATCH (u)-[recentRel:${usageRel}]->(recent:SurfaceForm)-[:${surfaceRel}]->(c)
+        RETURN recent, recentRel
+        ORDER BY recentRel.lastUsedAt DESC, recentRel.updatedAt DESC, recent.updatedAt DESC
         LIMIT 1
       }
       RETURN {
         canonicalName: item.canonicalName,
         conceptType: c.type,
         inputSurface: item.surface,
-        mostFrequent: freq,
-        mostRecent: recent
+        mostFrequent: { node: freq, rel: freqRel },
+        mostRecent: { node: recent, rel: recentRel }
       } AS row
     `;
 
-    const res = await this.neo4j.run(cypher, { items });
+    const res = await this.neo4j.run(cypher, { items, userId });
     return res.records.map(
       (record: Neo4jRecord) =>
         record.get('row') as ConsistencyRecommendationRow,
@@ -237,25 +251,41 @@ export class SuggestionsService {
 
   private mapConsistencyRow(
     row: ConsistencyRecommendationRow,
-  ): ConsistencyRecommendationDto {
+  ): ConsistencyRecommendationDto | null {
+    const normalizedInput = normalizeSurfaceForm(row.inputSurface ?? '');
+
+    const mostFrequent = this.toSurfaceRecommendation(
+      row.mostFrequent,
+      'most_frequent',
+      normalizedInput,
+    );
+    const mostRecent = this.toSurfaceRecommendation(
+      row.mostRecent,
+      'most_recent',
+      normalizedInput,
+    );
+
+    if (!mostFrequent && !mostRecent) {
+      return null;
+    }
+
     return {
       canonicalName: row.canonicalName,
       conceptType: row.conceptType ?? undefined,
       inputSurface: row.inputSurface ?? null,
-      mostFrequent: this.toSurfaceRecommendation(
-        row.mostFrequent,
-        'most_frequent',
-      ),
-      mostRecent: this.toSurfaceRecommendation(row.mostRecent, 'most_recent'),
+      mostFrequent,
+      mostRecent,
     };
   }
 
   private mapAutocompleteRecord(
     surfaceNode: Node,
     conceptNode: Node | null,
+    usageRel: Relationship | null,
   ): AutocompleteSuggestionDto {
     const surfaceProps = this.getNodeProperties(surfaceNode);
     const conceptProps = this.getNodeProperties(conceptNode);
+    const usageProps = this.getRelationshipProperties(usageRel);
 
     const surfaceValue = this.asString(surfaceProps['value']) ?? '';
     const conceptName =
@@ -269,22 +299,40 @@ export class SuggestionsService {
       surface: surfaceValue,
       conceptName,
       conceptType,
-      lastUsedAt: this.toIsoString(surfaceProps['lastUsedAt']),
-      usageCount: this.toNumber(surfaceProps['usageCount']),
+      lastUsedAt:
+        this.toIsoString(usageProps['lastUsedAt']) ??
+        this.toIsoString(surfaceProps['lastUsedAt']),
+      usageCount:
+        this.toNumber(usageProps['usageCount']) ??
+        this.toNumber(surfaceProps['usageCount']),
     };
   }
 
   private toSurfaceRecommendation(
-    node: Node | null | undefined,
+    entry: SurfaceRecommendationRowEntry | null | undefined,
     reason: RecommendationReason,
+    normalizedInput?: string,
   ): SurfaceRecommendationDto | null {
-    if (!node) return null;
+    const node = entry?.node ?? null;
+    const rel = entry?.rel ?? null;
+    if (!node || !rel) return null;
     const props = this.getNodeProperties(node);
+    const relProps = this.getRelationshipProperties(rel);
+    const surfaceValue = this.asString(props['value']) ?? '';
+    const normalizedSurface = normalizeSurfaceForm(surfaceValue);
+    if (normalizedInput && normalizedSurface === normalizedInput) {
+      return null;
+    }
+
     return {
       reason,
-      surface: this.asString(props['value']) ?? '',
-      usageCount: this.toNumber(props['usageCount']),
-      lastUsedAt: this.toIsoString(props['lastUsedAt']),
+      surface: surfaceValue,
+      usageCount:
+        this.toNumber(relProps['usageCount']) ??
+        this.toNumber(props['usageCount']),
+      lastUsedAt:
+        this.toIsoString(relProps['lastUsedAt']) ??
+        this.toIsoString(props['lastUsedAt']),
     };
   }
 
@@ -293,6 +341,17 @@ export class SuggestionsService {
   ): Record<string, unknown> {
     if (!node) return {};
     const props = node.properties;
+    if (props && typeof props === 'object') {
+      return props as Record<string, unknown>;
+    }
+    return {};
+  }
+
+  private getRelationshipProperties(
+    rel: Relationship | null | undefined,
+  ): Record<string, unknown> {
+    if (!rel) return {};
+    const props = rel.properties;
     if (props && typeof props === 'object') {
       return props as Record<string, unknown>;
     }
@@ -397,12 +456,17 @@ type CanonicalMention = {
   surface?: string | null;
 };
 
+type SurfaceRecommendationRowEntry = {
+  node?: Node | null;
+  rel?: Relationship | null;
+} | null;
+
 type ConsistencyRecommendationRow = {
   canonicalName: string;
   conceptType?: ConceptType;
   inputSurface?: string | null;
-  mostFrequent?: Node | null;
-  mostRecent?: Node | null;
+  mostFrequent?: SurfaceRecommendationRowEntry;
+  mostRecent?: SurfaceRecommendationRowEntry;
 };
 
 type CachedNerEntry = {

@@ -40,7 +40,7 @@ export class EventsService {
     const saved = await this.eventsRepo.save(event);
 
     // NER + 온톨로지 처리를 비동기로 큐잉하여 API 응답을 빠르게 반환
-    this.triggerOntologyProcessing(user, saved, 'create');
+    this.triggerOntologyProcessing(user, saved, 'create', dto.cacheToken);
 
     return saved;
   }
@@ -84,7 +84,7 @@ export class EventsService {
     const saved = await this.eventsRepo.save(event);
 
     // NER + 온톨로지 처리를 비동기로 큐잉하여 API 응답을 빠르게 반환
-    this.triggerOntologyProcessing(user, saved, 'update');
+    this.triggerOntologyProcessing(user, saved, 'update', dto.cacheToken);
 
     return saved;
   }
@@ -109,6 +109,7 @@ export class EventsService {
     user: User,
     event: Event,
     mode: 'create' | 'update',
+    cacheToken?: string | null,
   ): void {
     const owner = event.user ?? user;
     if (!owner) {
@@ -119,10 +120,18 @@ export class EventsService {
     }
 
     const text = (event.title ?? '').trim();
+    const normalizedToken = cacheToken?.trim();
 
     void (async () => {
       try {
-        const nerResult = await this.suggestionsService.runNER({ text });
+        const cached = normalizedToken?.length
+          ? await this.suggestionsService.consumeCachedNER(
+              normalizedToken,
+              owner.id,
+            )
+          : null;
+        const nerResult =
+          cached ?? (await this.suggestionsService.runNER({ text }));
         await this.ontologyService.processEventOntology(
           owner,
           event,

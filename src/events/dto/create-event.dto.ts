@@ -27,4 +27,8 @@ export class CreateEventDto {
   @IsString()
   @MaxLength(255)
   location?: string;
+
+  @IsOptional()
+  @IsString()
+  cacheToken?: string;
 }

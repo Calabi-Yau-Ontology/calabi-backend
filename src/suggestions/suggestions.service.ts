@@ -3,12 +3,12 @@ import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { AxiosError, isAxiosError } from 'axios';
-import { randomUUID } from 'crypto';
 import neo4j from 'neo4j-driver';
 import type { Node, Record as Neo4jRecord, Relationship } from 'neo4j-driver';
 import { Neo4jService } from 'src/neo4j/neo4j.service';
 import { RELATIONS } from 'src/ontology/constants/relations';
 import { isAllowedNERLabel } from 'src/ontology/constants/concept.types';
+import { NerCacheService } from './cache/ner-cache.service';
 import type { NERResponseDto } from './dto/ner-response.dto';
 import type { RunNERDto } from './dto/run-ner.dto';
 import type {
@@ -33,23 +33,21 @@ import type {
   CanonicalMention,
   ConsistencyRecommendationRow,
   SurfaceRecommendationRowEntry,
-  CachedNEREntry,
 } from './types/graph.types';
 
 const AUTOCOMPLETE_DEFAULT_LIMIT = 5;
 const AUTOCOMPLETE_MAX_LIMIT = 10;
-const NER_CACHE_TTL_MS = 30 * 60 * 1000;
 
 @Injectable()
 export class SuggestionsService {
   private readonly logger = new Logger(SuggestionsService.name);
   private readonly baseUrl: string;
-  private readonly nerCache = new Map<string, CachedNEREntry>();
 
   constructor(
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
     private readonly neo4j: Neo4jService,
+    private readonly nerCacheService: NerCacheService,
   ) {
     const mlConfig = this.configService.get<{ baseUrl: string }>('ml');
     this.baseUrl = mlConfig?.baseUrl ?? '';
@@ -120,7 +118,11 @@ export class SuggestionsService {
   ): Promise<ConsistencyCheckResponseDto> {
     const cleanedText = text?.trim() ?? '';
     const ner = await this.runNER({ text: cleanedText });
-    const cacheToken = this.cacheNERResult(userId, cleanedText, ner);
+    const cacheToken = await this.nerCacheService.store(
+      userId,
+      cleanedText,
+      ner,
+    );
 
     const canonicalMentions = this.extractCanonicalMentions(ner);
     if (!canonicalMentions.length) {
@@ -178,20 +180,18 @@ export class SuggestionsService {
   /**
    * NER 결과 캐시에서 토큰을 조회 (이후 Event 저장 시 활용 예정)
    */
-  getCachedNER(token: string, userId: string): NERResponseDto | null {
-    this.pruneNERCache();
-    const entry = this.nerCache.get(token);
-    if (!entry || entry.userId !== userId) {
-      return null;
-    }
-    return entry.ner;
+  async getCachedNER(
+    token: string,
+    userId: string,
+  ): Promise<NERResponseDto | null> {
+    return this.nerCacheService.resolve(token, userId);
   }
 
-  consumeCachedNER(token: string, userId: string): NERResponseDto | null {
-    const entry = this.getCachedNER(token, userId);
-    if (!entry) return null;
-    this.nerCache.delete(token);
-    return entry;
+  async consumeCachedNER(
+    token: string,
+    userId: string,
+  ): Promise<NERResponseDto | null> {
+    return this.nerCacheService.consume(token, userId);
   }
 
   // ---------------------------------------------------------------------------
@@ -334,31 +334,6 @@ export class SuggestionsService {
       ? numeric
       : AUTOCOMPLETE_DEFAULT_LIMIT;
     return Math.max(1, Math.min(Math.floor(candidate), AUTOCOMPLETE_MAX_LIMIT));
-  }
-
-  private cacheNERResult(
-    userId: string,
-    text: string,
-    ner: NERResponseDto,
-  ): string {
-    this.pruneNERCache();
-    const token = randomUUID();
-    this.nerCache.set(token, {
-      userId,
-      text,
-      ner,
-      createdAt: Date.now(),
-    });
-    return token;
-  }
-
-  private pruneNERCache(): void {
-    const now = Date.now();
-    for (const [token, entry] of this.nerCache.entries()) {
-      if (now - entry.createdAt > NER_CACHE_TTL_MS) {
-        this.nerCache.delete(token);
-      }
-    }
   }
 
   private normalizeAxiosError(error: unknown): AxiosError {

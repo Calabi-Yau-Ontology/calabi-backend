@@ -30,7 +30,7 @@ export class NerResponseDto {
   mentions: Array<{
     surface: string; // 원문 엔티티(없으면 text 사용)
     span: { start: number; end: number };
-    ner: { label: NERLabel, confidence?: number };
+    ner: { label: NERLabel; confidence?: number };
     canonical: { en?: string; reason?: string | null };
   }>;
 

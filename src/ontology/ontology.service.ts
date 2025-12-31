@@ -7,6 +7,7 @@ import { NerResponseDto } from 'src/suggestions/dto/ner-response.dto';
 import { ConceptType, NER_TO_CONCEPT_TYPE, isAllowedNerLabel } from './constants/concept.types';
 import { RELATIONS } from './constants/relations';
 import { ExpansionService } from './expansion/expansion.service';
+import { normalizeSurfaceForm } from 'src/common/utils/text-normalize';
 
 @Injectable()
 export class OntologyService {
@@ -185,7 +186,7 @@ export class OntologyService {
       string,
       {
         conceptType: ConceptType;
-        provenance: string | null;
+        surface: string | null;
       }
     >();
 
@@ -199,35 +200,103 @@ export class OntologyService {
 
       conceptMap.set(canonicalName, {
         conceptType: mappedType,
-        provenance: m?.surface?.trim() ?? null,
+        surface: m?.surface?.trim() ?? null,
       });
     }
 
-    const concepts = Array.from(conceptMap.entries()).map(([canonicalName, value]) => ({
-      canonicalName,
-      conceptType: value.conceptType,
-      provenance: value.provenance,
-    }));
+    const concepts = Array.from(conceptMap.entries()).map(
+      ([canonicalName, value]) => ({
+        canonicalName,
+        conceptType: value.conceptType,
+        surface: value.surface,
+      }),
+    );
 
     await Promise.all(
-      concepts.map(async ({ canonicalName, conceptType, provenance }) => {
-        await this.upsertConceptWithProps(canonicalName, conceptType, {
-          provenance,
+      concepts.map(async ({ canonicalName, conceptType, surface }) => {
+        const conceptProps: Record<string, any> = {
           source: 'ml',
-        });
+        };
+        if (surface) {
+          conceptProps.provenance = surface;
+        }
+
+        await this.upsertConceptWithProps(
+          canonicalName,
+          conceptType,
+          conceptProps,
+        );
         await Promise.all([
           this.linkEventToConcept(event.id, canonicalName),
           this.linkUserToConcept(user.id, canonicalName),
+          this.recordSurfaceForm(
+            user.id,
+            event.id,
+            canonicalName,
+            conceptType,
+            surface,
+          ),
         ]);
       }),
     );
 
     for (const { canonicalName } of concepts) {
-      void this.expansionService.expandConceptByName(canonicalName).catch((e: any) => {
-        this.logger.warn(
-          `Wikidata expansion skipped for "${canonicalName}": ${e?.message ?? e}`,
-        );
-      });
+      void this.expansionService
+        .expandConceptByName(canonicalName)
+        .catch((e: any) => {
+          this.logger.warn(
+            `Wikidata expansion skipped for "${canonicalName}": ${e?.message ?? e}`,
+          );
+        });
     }
+  }
+
+  private async recordSurfaceForm(
+    userId: string,
+    eventId: string,
+    conceptName: string,
+    conceptType: ConceptType,
+    surface: string | null,
+  ): Promise<void> {
+    const normalized = normalizeSurfaceForm(surface ?? '');
+    if (!normalized) return;
+
+    const key = `${conceptType}::${conceptName}::${normalized}`;
+    const now = new Date().toISOString();
+
+    const cypher = `
+      MATCH (c:Concept { name: $conceptName, type: $conceptType })
+      MERGE (sf:SurfaceForm { key: $key })
+      ON CREATE SET
+        sf.value = $surface,
+        sf.normalized = $normalized,
+        sf.createdAt = datetime($now),
+        sf.updatedAt = datetime($now),
+        sf.usageCount = 0,
+        sf.conceptName = $conceptName,
+        sf.conceptType = $conceptType
+      SET
+        sf.value = COALESCE($surface, sf.value),
+        sf.updatedAt = datetime($now),
+        sf.normalized = $normalized,
+        sf.usageCount = COALESCE(sf.usageCount, 0) + 1,
+        sf.lastUsedAt = datetime($now),
+        sf.lastUsedBy = $userId,
+        sf.lastUsedEventId = $eventId
+      MERGE (sf)-[r:${RELATIONS.SURFACE_OF}]->(c)
+      ON CREATE SET r.createdAt = datetime($now)
+      SET r.updatedAt = datetime($now)
+    `;
+
+    await this.neo4j.run(cypher, {
+      conceptName,
+      conceptType,
+      surface,
+      normalized,
+      key,
+      now,
+      userId,
+      eventId,
+    });
   }
 }

@@ -3,6 +3,13 @@ export const NEO4J_SCHEMA_STATEMENTS: string[] = [
   `CREATE CONSTRAINT concept_name_type_unique IF NOT EXISTS
    FOR (c:Concept) REQUIRE (c.name, c.type) IS UNIQUE`,
 
+  // SurfaceForm: unique key per concept + normalized value
+  `CREATE CONSTRAINT surface_form_key_unique IF NOT EXISTS
+   FOR (s:SurfaceForm) REQUIRE s.key IS UNIQUE`,
+
+  `CREATE INDEX surface_form_normalized_idx IF NOT EXISTS
+   FOR (s:SurfaceForm) ON (s.normalized)`,
+
   // Event 고유키
   `CREATE CONSTRAINT event_eventId_unique IF NOT EXISTS
    FOR (e:Event) REQUIRE e.eventId IS UNIQUE`,

@@ -93,7 +93,15 @@ export class EventsService {
     const event = await this.findOneByUser(userId, id);
     const eventId = event.id;
     await this.eventsRepo.remove(event);
-    await this.ontologyService.removeEvent(eventId);
+    try {
+      await this.ontologyService.removeEvent(eventId);
+    } catch (error) {
+      const err = error as Error;
+      this.logger.error(
+        `Failed to remove event ${eventId} from ontology: ${err?.message ?? err}`,
+        err?.stack,
+      );
+    }
     return { deleted: true };
   }
 
@@ -114,15 +122,13 @@ export class EventsService {
 
     void (async () => {
       try {
-        const nerResult = await this.suggestionsService.runNer({
-          text,
-        });
+        const nerResult = await this.suggestionsService.runNer({ text });
         await this.ontologyService.processEventOntology(
           owner,
           event,
           nerResult,
-          { 
-            mode
+          {
+            mode,
           },
         );
       } catch (error) {

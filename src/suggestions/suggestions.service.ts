@@ -8,9 +8,9 @@ import neo4j from 'neo4j-driver';
 import type { Node, Record as Neo4jRecord, Relationship } from 'neo4j-driver';
 import { Neo4jService } from 'src/neo4j/neo4j.service';
 import { RELATIONS } from 'src/ontology/constants/relations';
-import { isAllowedNerLabel } from 'src/ontology/constants/concept.types';
-import type { NerResponseDto } from './dto/ner-response.dto';
-import type { RunNerDto } from './dto/run-ner.dto';
+import { isAllowedNERLabel } from 'src/ontology/constants/concept.types';
+import type { NERResponseDto } from './dto/ner-response.dto';
+import type { RunNERDto } from './dto/run-ner.dto';
 import type {
   AutocompleteResponseDto,
   AutocompleteSuggestionDto,
@@ -33,7 +33,7 @@ import type {
   CanonicalMention,
   ConsistencyRecommendationRow,
   SurfaceRecommendationRowEntry,
-  CachedNerEntry,
+  CachedNEREntry,
 } from './types/graph.types';
 
 const AUTOCOMPLETE_DEFAULT_LIMIT = 5;
@@ -44,7 +44,7 @@ const NER_CACHE_TTL_MS = 30 * 60 * 1000;
 export class SuggestionsService {
   private readonly logger = new Logger(SuggestionsService.name);
   private readonly baseUrl: string;
-  private readonly nerCache = new Map<string, CachedNerEntry>();
+  private readonly nerCache = new Map<string, CachedNEREntry>();
 
   constructor(
     private readonly httpService: HttpService,
@@ -119,8 +119,8 @@ export class SuggestionsService {
     text: string,
   ): Promise<ConsistencyCheckResponseDto> {
     const cleanedText = text?.trim() ?? '';
-    const ner = await this.runNer({ text: cleanedText });
-    const cacheToken = this.cacheNerResult(userId, cleanedText, ner);
+    const ner = await this.runNER({ text: cleanedText });
+    const cacheToken = this.cacheNERResult(userId, cleanedText, ner);
 
     const canonicalMentions = this.extractCanonicalMentions(ner);
     if (!canonicalMentions.length) {
@@ -158,11 +158,11 @@ export class SuggestionsService {
     };
   }
 
-  async runNer(text: RunNerDto): Promise<NerResponseDto> {
+  async runNER(text: RunNERDto): Promise<NERResponseDto> {
     const url = `${this.baseUrl}/nlp/ner`;
 
     try {
-      const response$ = this.httpService.post<NerResponseDto>(url, text);
+      const response$ = this.httpService.post<NERResponseDto>(url, text);
       const { data } = await firstValueFrom(response$);
       return data ?? { mentions: [] };
     } catch (error: unknown) {
@@ -178,8 +178,8 @@ export class SuggestionsService {
   /**
    * NER 결과 캐시에서 토큰을 조회 (이후 Event 저장 시 활용 예정)
    */
-  getCachedNer(token: string, userId: string): NerResponseDto | null {
-    this.pruneNerCache();
+  getCachedNER(token: string, userId: string): NERResponseDto | null {
+    this.pruneNERCache();
     const entry = this.nerCache.get(token);
     if (!entry || entry.userId !== userId) {
       return null;
@@ -187,8 +187,8 @@ export class SuggestionsService {
     return entry.ner;
   }
 
-  consumeCachedNer(token: string, userId: string): NerResponseDto | null {
-    const entry = this.getCachedNer(token, userId);
+  consumeCachedNER(token: string, userId: string): NERResponseDto | null {
+    const entry = this.getCachedNER(token, userId);
     if (!entry) return null;
     this.nerCache.delete(token);
     return entry;
@@ -198,13 +198,13 @@ export class SuggestionsService {
   // Canonical mention & Neo4j query helpers
   // ---------------------------------------------------------------------------
 
-  private extractCanonicalMentions(ner: NerResponseDto): CanonicalMention[] {
+  private extractCanonicalMentions(ner: NERResponseDto): CanonicalMention[] {
     const mentions = ner?.mentions ?? [];
     const map = new Map<string, CanonicalMention>();
 
     for (const mention of mentions) {
       const label = mention?.ner?.label;
-      if (!isAllowedNerLabel(label)) continue;
+      if (!isAllowedNERLabel(label)) continue;
 
       const canonicalName = mention?.canonical?.en?.trim();
       if (!canonicalName || map.has(canonicalName)) continue;
@@ -336,12 +336,12 @@ export class SuggestionsService {
     return Math.max(1, Math.min(Math.floor(candidate), AUTOCOMPLETE_MAX_LIMIT));
   }
 
-  private cacheNerResult(
+  private cacheNERResult(
     userId: string,
     text: string,
-    ner: NerResponseDto,
+    ner: NERResponseDto,
   ): string {
-    this.pruneNerCache();
+    this.pruneNERCache();
     const token = randomUUID();
     this.nerCache.set(token, {
       userId,
@@ -352,7 +352,7 @@ export class SuggestionsService {
     return token;
   }
 
-  private pruneNerCache(): void {
+  private pruneNERCache(): void {
     const now = Date.now();
     for (const [token, entry] of this.nerCache.entries()) {
       if (now - entry.createdAt > NER_CACHE_TTL_MS) {

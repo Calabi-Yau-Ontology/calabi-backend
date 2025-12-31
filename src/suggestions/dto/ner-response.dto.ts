@@ -1,27 +1,6 @@
-// export class NerEntityDto {
-//   text!: string;
-//   label!: string;
-//   start!: number;
-//   end!: number;
-// }
+import type { NERLabel } from 'src/ontology/constants/concept.types';
 
-// export class NerResponseDto {
-//   entities!: NerEntityDto[];
-// }
-
-// 25.12.21 기준 NER 라벨 목록
-export type NERLabel =
-  | 'Activity'
-  | 'Location'
-  | 'Person'
-  | 'Project'
-  | 'Topic'
-  | 'Organization'
-  | 'Food'
-  | 'Date'
-  | 'None';
-
-export class NerResponseDto {
+export class NERResponseDto {
   text?: string;
   lang?: 'ko' | 'en' | 'unknown';
   normalized_text_en?: string | null;

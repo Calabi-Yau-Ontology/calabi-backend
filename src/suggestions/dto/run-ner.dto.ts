@@ -1,6 +1,6 @@
 import { IsString, MinLength } from 'class-validator';
 
-export class RunNerDto {
+export class RunNERDto {
   @IsString()
   @MinLength(1)
   text!: string;

@@ -1,6 +1,6 @@
 import type { ConceptType } from 'src/ontology/constants/concept.types';
 import type { Node, Relationship } from 'neo4j-driver';
-import type { NerResponseDto } from '../dto/ner-response.dto';
+import type { NERResponseDto } from '../dto/ner-response.dto';
 
 export type SurfaceFormData = {
   value?: string;
@@ -40,9 +40,9 @@ export type CanonicalMention = {
   surface?: string | null;
 };
 
-export type CachedNerEntry = {
+export type CachedNEREntry = {
   userId: string;
   text: string;
-  ner: NerResponseDto;
+  ner: NERResponseDto;
   createdAt: number;
 };

@@ -122,7 +122,7 @@ export class EventsService {
 
     void (async () => {
       try {
-        const nerResult = await this.suggestionsService.runNer({ text });
+        const nerResult = await this.suggestionsService.runNER({ text });
         await this.ontologyService.processEventOntology(
           owner,
           event,

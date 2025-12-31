@@ -2,13 +2,13 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Neo4jService } from 'src/neo4j/neo4j.service';
 import { Event } from 'src/events/entities/event.entity';
 import { User } from 'src/users/entities/user.entity';
-import { NerResponseDto } from 'src/suggestions/dto/ner-response.dto';
+import { NERResponseDto } from 'src/suggestions/dto/ner-response.dto';
 import { normalizeSurfaceForm } from 'src/common/utils/text-normalize';
 
 import {
   ConceptType,
   NER_TO_CONCEPT_TYPE,
-  isAllowedNerLabel,
+  isAllowedNERLabel,
 } from './constants/concept.types';
 import { RELATIONS } from './constants/relations';
 import { ExpansionService } from './expansion/expansion.service';
@@ -175,7 +175,7 @@ export class OntologyService {
   async processEventOntology(
     user: User,
     event: Event,
-    ner: NerResponseDto,
+    ner: NERResponseDto,
     options?: { mode?: 'create' | 'update' },
   ) {
     const mentions = ner?.mentions ?? [];
@@ -200,7 +200,7 @@ export class OntologyService {
 
     for (const m of mentions) {
       const label = m?.ner?.label;
-      if (!isAllowedNerLabel(label)) continue;
+      if (!isAllowedNERLabel(label)) continue;
       const mappedType = NER_TO_CONCEPT_TYPE[label];
 
       const canonicalName = m?.canonical?.en?.trim();

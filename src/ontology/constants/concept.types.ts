@@ -13,7 +13,7 @@ export const NER_LABELS = [
   'Date',
   'None',
 ] as const;
-export type NerLabel = (typeof NER_LABELS)[number];
+export type NERLabel = (typeof NER_LABELS)[number];
 
 const LABEL_TO_CONCEPT_TYPE = {
   Activity: 'Activity',
@@ -29,16 +29,21 @@ const LABEL_TO_CONCEPT_TYPE = {
 } as const;
 
 type LabelToConceptTypeMap = typeof LABEL_TO_CONCEPT_TYPE;
-export type AllowedNerLabel = keyof LabelToConceptTypeMap;
-export type ConceptType = LabelToConceptTypeMap[AllowedNerLabel];
+export type AllowedNERLabel = keyof LabelToConceptTypeMap;
+export type ConceptType = LabelToConceptTypeMap[AllowedNERLabel];
 
-export const NER_TO_CONCEPT_TYPE: Record<AllowedNerLabel, ConceptType> = LABEL_TO_CONCEPT_TYPE;
+export const NER_TO_CONCEPT_TYPE: Record<AllowedNERLabel, ConceptType> =
+  LABEL_TO_CONCEPT_TYPE;
 
-const allowedLabelList = Object.keys(LABEL_TO_CONCEPT_TYPE) as AllowedNerLabel[];
-export const ALLOWED_NER_LABELS = new Set<AllowedNerLabel>(allowedLabelList);
-export const isAllowedNerLabel = (label: unknown): label is AllowedNerLabel => {
+const allowedLabelList = Object.keys(
+  LABEL_TO_CONCEPT_TYPE,
+) as AllowedNERLabel[];
+export const ALLOWED_NER_LABELS = new Set<AllowedNERLabel>(allowedLabelList);
+export const isAllowedNERLabel = (
+  label: unknown,
+): label is AllowedNERLabel => {
   if (typeof label !== 'string') return false;
-  return ALLOWED_NER_LABELS.has(label as AllowedNerLabel);
+  return ALLOWED_NER_LABELS.has(label as AllowedNERLabel);
 };
 
 const conceptTypeList = Array.from(

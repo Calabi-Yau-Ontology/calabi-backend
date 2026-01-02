@@ -2,6 +2,7 @@ import {
   IsDateString,
   IsOptional,
   IsString,
+  IsUUID,
   MaxLength,
   MinLength,
 } from 'class-validator';
@@ -31,4 +32,7 @@ export class CreateEventDto {
   @IsOptional()
   @IsString()
   cacheToken?: string;
+
+  @IsUUID()
+  calendarId!: string;
 }

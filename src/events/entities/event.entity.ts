@@ -5,8 +5,11 @@ import {
   ManyToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
+  JoinColumn,
+  RelationId,
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
+import { Calendar } from '../../calendars/entities/calendar.entity';
 
 @Entity('events')
 export class Event {
@@ -15,6 +18,13 @@ export class Event {
 
   @ManyToOne(() => User, { eager: true, onDelete: 'CASCADE' })
   user!: User;
+
+  @ManyToOne(() => Calendar, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'calendarId' })
+  calendar?: Calendar | null;
+
+  @RelationId((event: Event) => event.calendar)
+  calendarId?: string | null;
 
   @Column()
   title!: string;

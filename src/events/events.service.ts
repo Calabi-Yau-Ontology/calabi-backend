@@ -8,6 +8,7 @@ import { UsersService } from '../users/users.service';
 import { User } from 'src/users/entities/user.entity';
 import { OntologyService } from 'src/ontology/ontology.service';
 import { SuggestionsService } from 'src/suggestions/suggestions.service';
+import { Calendar } from '../calendars/entities/calendar.entity';
 
 @Injectable()
 export class EventsService {
@@ -16,6 +17,8 @@ export class EventsService {
   constructor(
     @InjectRepository(Event)
     private readonly eventsRepo: Repository<Event>,
+    @InjectRepository(Calendar)
+    private readonly calendarsRepo: Repository<Calendar>,
     private readonly usersService: UsersService,
     private readonly ontologyService: OntologyService,
     private readonly suggestionsService: SuggestionsService,
@@ -27,8 +30,16 @@ export class EventsService {
       throw new NotFoundException('User not found');
     }
 
+    const calendar = await this.calendarsRepo.findOne({
+      where: { id: dto.calendarId, user: { id: userId } },
+    });
+    if (!calendar) {
+      throw new NotFoundException('Calendar not found');
+    }
+
     const event = this.eventsRepo.create({
       user,
+      calendar,
       title: dto.title,
       description: dto.description,
       startTime: new Date(dto.startTime),
@@ -79,6 +90,15 @@ export class EventsService {
     if (dto.endTime !== undefined)
       event.endTime = dto.endTime ? new Date(dto.endTime) : null;
     if (dto.location !== undefined) event.location = dto.location;
+    if (dto.calendarId !== undefined) {
+      const calendar = await this.calendarsRepo.findOne({
+        where: { id: dto.calendarId, user: { id: userId } },
+      });
+      if (!calendar) {
+        throw new NotFoundException('Calendar not found');
+      }
+      event.calendar = calendar;
+    }
 
     // return this.eventsRepo.save(event);
     const saved = await this.eventsRepo.save(event);

@@ -10,6 +10,7 @@ import { EventsModule } from './events/events.module';
 import { SuggestionsModule } from './suggestions/suggestions.module';
 import { OntologyModule } from './ontology/ontology.module';
 import { HealthModule } from './health/health.module';
+import { CalendarsModule } from './calendars/calendars.module';
 import { RedisModule } from './redis/redis.module';
 
 @Module({
@@ -30,6 +31,7 @@ import { RedisModule } from './redis/redis.module';
     UsersModule,
     AuthModule,
     EventsModule,
+    CalendarsModule,
     SuggestionsModule,
     OntologyModule,
     HealthModule,

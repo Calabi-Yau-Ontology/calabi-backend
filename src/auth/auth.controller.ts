@@ -30,7 +30,9 @@ export class AuthController {
 
   @Get('google/login')
   @UseGuards(AuthGuard('google'))
-  async googleCallback(@AuthUser() profile: GoogleProfile): Promise<LoginOutput> {
+  async googleCallback(
+    @AuthUser() profile: GoogleProfile,
+  ): Promise<LoginOutput> {
     return this.authService.loginWithGoogle(profile);
   }
 

@@ -9,7 +9,7 @@ import {
   RelationId,
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
-import { Calendar } from '../../calendars/entities/calendar.entity';
+import { Category } from '../../categories/entities/category.entity';
 
 @Entity('events')
 export class Event {
@@ -19,12 +19,12 @@ export class Event {
   @ManyToOne(() => User, { eager: true, onDelete: 'CASCADE' })
   user!: User;
 
-  @ManyToOne(() => Calendar, { nullable: true, onDelete: 'SET NULL' })
-  @JoinColumn({ name: 'calendarId' })
-  calendar?: Calendar | null;
+  @ManyToOne(() => Category, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'categoryId' })
+  category?: Category | null;
 
-  @RelationId((event: Event) => event.calendar)
-  calendarId?: string | null;
+  @RelationId((event: Event) => event.category)
+  categoryId?: string | null;
 
   @Column()
   title!: string;

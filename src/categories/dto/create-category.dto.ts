@@ -1,6 +1,13 @@
-import { IsBoolean, IsHexColor, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsHexColor,
+  IsOptional,
+  IsString,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
-export class CreateCalendarDto {
+export class CreateCategoryDto {
   @IsString()
   @MinLength(1)
   @MaxLength(100)

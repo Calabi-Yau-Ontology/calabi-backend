@@ -39,9 +39,7 @@ const allowedLabelList = Object.keys(
   LABEL_TO_CONCEPT_TYPE,
 ) as AllowedNERLabel[];
 export const ALLOWED_NER_LABELS = new Set<AllowedNERLabel>(allowedLabelList);
-export const isAllowedNERLabel = (
-  label: unknown,
-): label is AllowedNERLabel => {
+export const isAllowedNERLabel = (label: unknown): label is AllowedNERLabel => {
   if (typeof label !== 'string') return false;
   return ALLOWED_NER_LABELS.has(label as AllowedNERLabel);
 };

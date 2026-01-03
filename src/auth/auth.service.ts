@@ -21,7 +21,9 @@ export class AuthService {
 
   async loginWithGoogle(profile: GoogleProfile): Promise<LoginOutput> {
     if (!profile.email) {
-      throw new UnauthorizedException('Google 계정에서 이메일을 받을 수 없습니다.');
+      throw new UnauthorizedException(
+        'Google 계정에서 이메일을 받을 수 없습니다.',
+      );
     }
 
     let user = await this.usersService.findByEmail(profile.email);

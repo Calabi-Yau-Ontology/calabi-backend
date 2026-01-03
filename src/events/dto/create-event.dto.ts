@@ -34,5 +34,5 @@ export class CreateEventDto {
   cacheToken?: string;
 
   @IsUUID()
-  calendarId!: string;
+  categoryId!: string;
 }

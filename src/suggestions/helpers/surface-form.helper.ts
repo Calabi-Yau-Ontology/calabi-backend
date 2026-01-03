@@ -11,9 +11,7 @@ import type {
   SurfaceFormData,
   UsedSurfaceData,
 } from '../types/graph.types';
-import type {
-  AutocompleteSuggestionDto,
-} from '../dto/autocomplete-response.dto';
+import type { AutocompleteSuggestionDto } from '../dto/autocomplete-response.dto';
 import type {
   SurfaceRecommendationDto,
   RecommendationReason,
@@ -41,7 +39,9 @@ export const extractConcept = (node: Node | null): ConceptData => {
   };
 };
 
-export const extractUsedSurface = (rel: Relationship | null): UsedSurfaceData => {
+export const extractUsedSurface = (
+  rel: Relationship | null,
+): UsedSurfaceData => {
   if (!rel) return UsedSurfaceDefaults;
   const props = rel.properties ?? {};
   return {
@@ -144,7 +144,15 @@ const neo4jDateTimeToIso = (value: Neo4jDateTime): string => {
   const nanosecond = asNumber(value.nanosecond) ?? 0;
   const millisecond = Math.floor((nanosecond ?? 0) / 1_000_000);
   const date = new Date(
-    Date.UTC(year, (month ?? 1) - 1, day ?? 1, hour ?? 0, minute ?? 0, second ?? 0, millisecond),
+    Date.UTC(
+      year,
+      (month ?? 1) - 1,
+      day ?? 1,
+      hour ?? 0,
+      minute ?? 0,
+      second ?? 0,
+      millisecond,
+    ),
   );
   return date.toISOString();
 };

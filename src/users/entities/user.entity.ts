@@ -2,12 +2,10 @@ import {
   Column,
   CreateDateColumn,
   Entity,
-  OneToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
 import { ApiProperty } from '@nestjs/swagger';
-// import { UserSettings } from './user-settings.entity';
 
 @Entity('users')
 export class User {
@@ -47,12 +45,4 @@ export class User {
   })
   @UpdateDateColumn()
   updatedAt!: Date;
-
-  // @ApiProperty({
-  //   description: '사용자 설정',
-  //   type: () => UserSettings,
-  //   required: false,
-  // })
-  // @OneToOne(() => UserSettings, (settings) => settings.user, { nullable: true })
-  // settings?: UserSettings;
 }

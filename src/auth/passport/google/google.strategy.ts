@@ -3,6 +3,7 @@ import { Profile, Strategy, VerifyCallback } from 'passport-google-oauth20';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleProfile } from '../../dtos/google.dto';
+import { ERROR_MESSAGES } from 'src/common/constants/error-messages';
 
 @Injectable()
 export class GoogleStrategy extends PassportStrategy(Strategy) {
@@ -24,7 +25,7 @@ export class GoogleStrategy extends PassportStrategy(Strategy) {
     const { displayName, name, emails, photos } = profile;
     if (!emails || emails.length === 0) {
       return done(
-        new UnauthorizedException('Could not get email from Google account'),
+        new UnauthorizedException(ERROR_MESSAGES.AUTH.GOOGLE_EMAIL_MISSING),
         false,
       );
     }

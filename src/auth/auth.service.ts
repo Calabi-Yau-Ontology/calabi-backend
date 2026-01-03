@@ -11,6 +11,7 @@ import { User } from '../users/entities/user.entity';
 import { GoogleProfile } from './dtos/google.dto';
 import { LocalLoginDto, LoginOutput } from './dtos/login.dto';
 import { RegisterDto } from './dtos/register.dto';
+import { ERROR_MESSAGES } from 'src/common/constants/error-messages';
 
 @Injectable()
 export class AuthService {
@@ -22,7 +23,7 @@ export class AuthService {
   async loginWithGoogle(profile: GoogleProfile): Promise<LoginOutput> {
     if (!profile.email) {
       throw new UnauthorizedException(
-        'Google 계정에서 이메일을 받을 수 없습니다.',
+        ERROR_MESSAGES.AUTH.GOOGLE_EMAIL_MISSING,
       );
     }
 
@@ -40,12 +41,12 @@ export class AuthService {
   async loginWithCredentials(dto: LocalLoginDto): Promise<LoginOutput> {
     const user = await this.usersService.findByEmail(dto.email);
     if (!user) {
-      throw new UnauthorizedException('Email or password is incorrect.');
+      throw new UnauthorizedException(ERROR_MESSAGES.AUTH.INVALID_CREDENTIALS);
     }
 
     const isMatch = await bcrypt.compare(dto.password, user.passwordHash);
     if (!isMatch) {
-      throw new UnauthorizedException('Email or password is incorrect.');
+      throw new UnauthorizedException(ERROR_MESSAGES.AUTH.INVALID_CREDENTIALS);
     }
 
     return this.buildLoginResponse(user);
@@ -54,7 +55,7 @@ export class AuthService {
   async register(dto: RegisterDto): Promise<LoginOutput> {
     const existing = await this.usersService.findByEmail(dto.email);
     if (existing) {
-      throw new BadRequestException('Email is already in use.');
+      throw new BadRequestException(ERROR_MESSAGES.AUTH.EMAIL_IN_USE);
     }
 
     const user = await this.usersService.create(dto);

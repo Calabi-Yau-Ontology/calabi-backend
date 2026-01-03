@@ -20,6 +20,7 @@ import type {
   ConsistencyRecommendationDto,
   SurfaceRecommendationDto,
   RecommendationReason,
+  ConsistencyErrorDto,
 } from './dto/consistency-response.dto';
 import {
   extractConcept,
@@ -118,6 +119,7 @@ export class SuggestionsService {
   ): Promise<ConsistencyCheckResponseDto> {
     const cleanedText = text?.trim() ?? '';
     const ner = await this.runNER({ text: cleanedText });
+    const nerErrors = this.mapConsistencyErrors(ner.errors);
     const cacheToken = await this.nerCacheService.store(
       userId,
       cleanedText,
@@ -129,7 +131,7 @@ export class SuggestionsService {
       return {
         cacheToken,
         results: [],
-        errors: ner.errors,
+        errors: nerErrors,
       };
     }
 
@@ -142,7 +144,10 @@ export class SuggestionsService {
         `Consistency query failed for user ${userId}: ${message}`,
         this.extractErrorStack(error),
       );
-      const errors = [...(ner.errors ?? []), { stage: 'neo4j', message }];
+      const errors: ConsistencyErrorDto[] = [
+        ...(nerErrors ?? []),
+        { stage: 'neo4j', message },
+      ];
       return {
         cacheToken,
         results: [],
@@ -156,7 +161,7 @@ export class SuggestionsService {
     return {
       cacheToken,
       results,
-      errors: ner.errors,
+      errors: nerErrors,
     };
   }
 
@@ -192,6 +197,22 @@ export class SuggestionsService {
     userId: string,
   ): Promise<NERResponseDto | null> {
     return this.nerCacheService.consume(token, userId);
+  }
+
+  private mapConsistencyErrors(
+    errors?: Array<Record<string, any>>,
+  ): ConsistencyErrorDto[] | undefined {
+    if (!errors?.length) return undefined;
+    return errors.map((error) => ({
+      stage:
+        typeof error?.stage === 'string' && error.stage.trim().length
+          ? error.stage
+          : 'unknown',
+      message:
+        typeof error?.message === 'string' && error.message.trim().length
+          ? error.message
+          : JSON.stringify(error ?? {}),
+    }));
   }
 
   // ---------------------------------------------------------------------------

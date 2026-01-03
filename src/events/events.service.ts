@@ -9,6 +9,7 @@ import { User } from 'src/users/entities/user.entity';
 import { OntologyService } from 'src/ontology/ontology.service';
 import { SuggestionsService } from 'src/suggestions/suggestions.service';
 import { Category } from '../categories/entities/category.entity';
+import { ERROR_MESSAGES } from 'src/common/constants/error-messages';
 
 @Injectable()
 export class EventsService {
@@ -27,14 +28,14 @@ export class EventsService {
   async create(userId: string, dto: CreateEventDto): Promise<Event> {
     const user = await this.usersService.findOne(userId);
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException(ERROR_MESSAGES.USER.NOT_FOUND);
     }
 
     const category = await this.categoriesRepo.findOne({
       where: { id: dto.categoryId, user: { id: userId } },
     });
     if (!category) {
-      throw new NotFoundException('Category not found');
+      throw new NotFoundException(ERROR_MESSAGES.CATEGORY.NOT_FOUND);
     }
 
     const event = this.eventsRepo.create({
@@ -69,7 +70,7 @@ export class EventsService {
     const event = await this.eventsRepo.findOne({
       where: { id, user: { id: userId } },
     });
-    if (!event) throw new NotFoundException('Event not found');
+    if (!event) throw new NotFoundException(ERROR_MESSAGES.EVENT.NOT_FOUND);
     return event;
   }
 
@@ -81,7 +82,7 @@ export class EventsService {
     const event = await this.findOneByUser(userId, id);
     const user = await this.usersService.findOne(userId);
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException(ERROR_MESSAGES.USER.NOT_FOUND);
     }
 
     if (dto.title !== undefined) event.title = dto.title;
@@ -95,7 +96,7 @@ export class EventsService {
         where: { id: dto.categoryId, user: { id: userId } },
       });
       if (!category) {
-        throw new NotFoundException('Category not found');
+        throw new NotFoundException(ERROR_MESSAGES.CATEGORY.NOT_FOUND);
       }
       event.category = category;
     }

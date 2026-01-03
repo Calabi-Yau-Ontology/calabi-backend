@@ -5,6 +5,7 @@ import { Category } from './entities/category.entity';
 import { CreateCategoryDto } from './dto/create-category.dto';
 import { UpdateCategoryDto } from './dto/update-category.dto';
 import { UsersService } from '../users/users.service';
+import { ERROR_MESSAGES } from 'src/common/constants/error-messages';
 
 @Injectable()
 export class CategoriesService {
@@ -16,7 +17,7 @@ export class CategoriesService {
 
   async create(userId: string, dto: CreateCategoryDto): Promise<Category> {
     const user = await this.usersService.findOne(userId);
-    if (!user) throw new NotFoundException('User not found');
+    if (!user) throw new NotFoundException(ERROR_MESSAGES.USER.NOT_FOUND);
 
     const category = this.categoriesRepo.create({
       user,
@@ -44,7 +45,9 @@ export class CategoriesService {
     const category = await this.categoriesRepo.findOne({
       where: { id, user: { id: userId } },
     });
-    if (!category) throw new NotFoundException('Category not found');
+    if (!category) {
+      throw new NotFoundException(ERROR_MESSAGES.CATEGORY.NOT_FOUND);
+    }
     return category;
   }
 
@@ -73,7 +76,7 @@ export class CategoriesService {
     userId: string,
   ): Promise<Category | null> {
     const user = await this.usersService.findOne(userId);
-    if (!user) throw new NotFoundException('User not found');
+    if (!user) throw new NotFoundException(ERROR_MESSAGES.USER.NOT_FOUND);
 
     const category = this.categoriesRepo.create({
       user,

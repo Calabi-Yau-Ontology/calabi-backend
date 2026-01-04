@@ -5,8 +5,6 @@ export type WikidataSearchItem = {
 };
 
 export type WikidataNeighbor = {
-//   fromQid: string;
-//   toQid: string;
   neighborQid: string;
   neighborLabel: string;
   rel: 'INSTANCE_OF' | 'SUBCLASS_OF' | 'HAS_PART' | 'HAS_GOAL';

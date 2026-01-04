@@ -1,18 +1,25 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Event } from './entities/event.entity';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
 import { UsersService } from '../users/users.service';
+import { User } from 'src/users/entities/user.entity';
 import { OntologyService } from 'src/ontology/ontology.service';
 import { SuggestionsService } from 'src/suggestions/suggestions.service';
+import { Category } from '../categories/entities/category.entity';
+import { ERROR_MESSAGES } from 'src/common/constants/error-messages';
 
 @Injectable()
 export class EventsService {
+  private readonly logger = new Logger(EventsService.name);
+
   constructor(
     @InjectRepository(Event)
     private readonly eventsRepo: Repository<Event>,
+    @InjectRepository(Category)
+    private readonly categoriesRepo: Repository<Category>,
     private readonly usersService: UsersService,
     private readonly ontologyService: OntologyService,
     private readonly suggestionsService: SuggestionsService,
@@ -21,11 +28,19 @@ export class EventsService {
   async create(userId: string, dto: CreateEventDto): Promise<Event> {
     const user = await this.usersService.findOne(userId);
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException(ERROR_MESSAGES.USER.NOT_FOUND);
+    }
+
+    const category = await this.categoriesRepo.findOne({
+      where: { id: dto.categoryId, user: { id: userId } },
+    });
+    if (!category) {
+      throw new NotFoundException(ERROR_MESSAGES.CATEGORY.NOT_FOUND);
     }
 
     const event = this.eventsRepo.create({
       user,
+      category,
       title: dto.title,
       description: dto.description,
       startTime: new Date(dto.startTime),
@@ -36,13 +51,8 @@ export class EventsService {
     // return this.eventsRepo.save(event);
     const saved = await this.eventsRepo.save(event);
 
-    // NER 실행
-    const nerResult = await this.suggestionsService.runNer({
-      text: `${saved.title ?? ''}${saved.description ? '; ' + saved.description : ''}`.trim(),
-    });
-
-    // Ontology 반영
-    await this.ontologyService.processEventOntology(saved.user, saved, nerResult);
+    // NER + 온톨로지 처리를 비동기로 큐잉하여 API 응답을 빠르게 반환
+    this.triggerOntologyProcessing(user, saved, 'create', dto.cacheToken);
 
     return saved;
   }
@@ -60,7 +70,7 @@ export class EventsService {
     const event = await this.eventsRepo.findOne({
       where: { id, user: { id: userId } },
     });
-    if (!event) throw new NotFoundException('Event not found');
+    if (!event) throw new NotFoundException(ERROR_MESSAGES.EVENT.NOT_FOUND);
     return event;
   }
 
@@ -70,27 +80,32 @@ export class EventsService {
     dto: UpdateEventDto,
   ): Promise<Event> {
     const event = await this.findOneByUser(userId, id);
+    const user = await this.usersService.findOne(userId);
+    if (!user) {
+      throw new NotFoundException(ERROR_MESSAGES.USER.NOT_FOUND);
+    }
 
     if (dto.title !== undefined) event.title = dto.title;
     if (dto.description !== undefined) event.description = dto.description;
-    if (dto.startTime !== undefined)
-      event.startTime = new Date(dto.startTime);
+    if (dto.startTime !== undefined) event.startTime = new Date(dto.startTime);
     if (dto.endTime !== undefined)
       event.endTime = dto.endTime ? new Date(dto.endTime) : null;
     if (dto.location !== undefined) event.location = dto.location;
-    
+    if (dto.categoryId !== undefined) {
+      const category = await this.categoriesRepo.findOne({
+        where: { id: dto.categoryId, user: { id: userId } },
+      });
+      if (!category) {
+        throw new NotFoundException(ERROR_MESSAGES.CATEGORY.NOT_FOUND);
+      }
+      event.category = category;
+    }
+
     // return this.eventsRepo.save(event);
     const saved = await this.eventsRepo.save(event);
 
-    // NER 실행
-    const nerResult = await this.suggestionsService.runNer({
-      text: `${saved.title ?? ''}${saved.description ? '; ' + saved.description : ''}`.trim(),
-    });
-
-    // Ontology 반영
-    await this.ontologyService.processEventOntology(saved.user, saved, nerResult, {
-      mode: 'update',
-    });
+    // NER + 온톨로지 처리를 비동기로 큐잉하여 API 응답을 빠르게 반환
+    this.triggerOntologyProcessing(user, saved, 'update', dto.cacheToken);
 
     return saved;
   }
@@ -99,7 +114,60 @@ export class EventsService {
     const event = await this.findOneByUser(userId, id);
     const eventId = event.id;
     await this.eventsRepo.remove(event);
-    await this.ontologyService.removeEvent(eventId);
+    try {
+      await this.ontologyService.removeEvent(eventId);
+    } catch (error) {
+      const err = error as Error;
+      this.logger.error(
+        `Failed to remove event ${eventId} from ontology: ${err?.message ?? err}`,
+        err?.stack,
+      );
+    }
     return { deleted: true };
+  }
+
+  private triggerOntologyProcessing(
+    user: User,
+    event: Event,
+    mode: 'create' | 'update',
+    cacheToken?: string | null,
+  ): void {
+    const owner = event.user ?? user;
+    if (!owner) {
+      this.logger.warn(
+        `Skip ontology processing for event ${event.id}: missing user context`,
+      );
+      return;
+    }
+
+    const text = (event.title ?? '').trim();
+    const normalizedToken = cacheToken?.trim();
+
+    void (async () => {
+      try {
+        const cached = normalizedToken?.length
+          ? await this.suggestionsService.consumeCachedNER(
+              normalizedToken,
+              owner.id,
+            )
+          : null;
+        const nerResult =
+          cached ?? (await this.suggestionsService.runNER({ text }));
+        await this.ontologyService.processEventOntology(
+          owner,
+          event,
+          nerResult,
+          {
+            mode,
+          },
+        );
+      } catch (error) {
+        const err = error as Error;
+        this.logger.error(
+          `Failed to process ontology for event ${event.id} (${mode}): ${err?.message ?? err}`,
+          err?.stack,
+        );
+      }
+    })();
   }
 }

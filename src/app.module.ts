@@ -10,6 +10,8 @@ import { EventsModule } from './events/events.module';
 import { SuggestionsModule } from './suggestions/suggestions.module';
 import { OntologyModule } from './ontology/ontology.module';
 import { HealthModule } from './health/health.module';
+import { CategoriesModule } from './categories/categories.module';
+import { RedisModule } from './redis/redis.module';
 
 @Module({
   imports: [
@@ -19,8 +21,8 @@ import { HealthModule } from './health/health.module';
         process.env.NODE_ENV === 'dev'
           ? '.env.dev'
           : process.env.NODE_ENV === 'prod'
-          ? '.env.prod'
-          : '.env.test',
+            ? '.env.prod'
+            : '.env.test',
       load: [configuration],
       validate,
     }),
@@ -29,9 +31,11 @@ import { HealthModule } from './health/health.module';
     UsersModule,
     AuthModule,
     EventsModule,
+    CategoriesModule,
     SuggestionsModule,
     OntologyModule,
     HealthModule,
+    RedisModule,
   ],
 })
 export class AppModule {}

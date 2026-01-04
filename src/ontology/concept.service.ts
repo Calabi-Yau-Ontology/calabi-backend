@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Neo4jService } from 'src/neo4j/neo4j.service';
-import { ConceptType } from './concept.types';
+import { ConceptType } from './constants/concept.types';
 
 export type ConceptNode = {
   id: string;
@@ -16,7 +16,7 @@ export class ConceptService {
   constructor(private readonly neo4j: Neo4jService) {}
 
   async upsertConcept(params: {
-    name: string;          // canonical_en
+    name: string; // canonical_en
     type: ConceptType;
     source: 'user' | 'wikidata';
   }): Promise<ConceptNode> {

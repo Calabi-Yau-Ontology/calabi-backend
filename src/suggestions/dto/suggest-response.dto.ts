@@ -1,4 +1,4 @@
-export class NerEntityDto {
+export class NEREntityDto {
   text!: string;
   label!: string;
   start!: number;
@@ -13,5 +13,5 @@ export class SuggestItemDto {
 
 export class SuggestResponseDto {
   suggestions!: SuggestItemDto[];
-  entities!: NerEntityDto[];
+  entities!: NEREntityDto[];
 }

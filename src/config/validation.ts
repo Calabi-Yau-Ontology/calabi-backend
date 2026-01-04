@@ -32,6 +32,17 @@ class EnvironmentVariables {
   ML_BASE_URL!: string;
 
   @IsString()
+  REDIS_HOST!: string;
+  @IsString()
+  REDIS_PORT!: string;
+  @IsOptional()
+  @IsString()
+  REDIS_PASSWORD?: string;
+  @IsOptional()
+  @IsString()
+  REDIS_KEY_PREFIX?: string;
+
+  @IsString()
   GOOGLE_CLIENT_ID!: string;
   @IsString()
   GOOGLE_CLIENT_SECRET!: string;

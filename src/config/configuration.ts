@@ -1,5 +1,3 @@
-import { use } from "passport";
-
 export default () => ({
   port: parseInt(process.env.PORT ?? '4000', 10),
   database: {
@@ -26,6 +24,12 @@ export default () => ({
   },
   ml: {
     baseUrl: process.env.ML_BASE_URL ?? 'http://localhost:8000',
+  },
+  redis: {
+    host: process.env.REDIS_HOST ?? 'localhost',
+    port: parseInt(process.env.REDIS_PORT ?? '6379', 10),
+    password: process.env.REDIS_PASSWORD ?? undefined,
+    keyPrefix: process.env.REDIS_KEY_PREFIX ?? 'CALABI:',
   },
   wikidata: {
     sparqlEndpoint: process.env.WIKIDATA_SPARQL_ENDPOINT,

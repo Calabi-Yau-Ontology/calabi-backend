@@ -35,10 +35,25 @@ services:
       - calabi_neo4j_logs:/logs
     networks:
       - calabi-network
+  redis:
+    image: redis:7-alpine
+    container_name: calabi-redis
+    restart: always
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - calabi_redis_data:/data
+    networks:
+      - calabi-network
 volumes:
   calabi_pg_data:
   calabi_neo4j_data:
   calabi_neo4j_logs:
+  calabi_redis_data:
 networks:
   calabi-network:
     driver: bridge

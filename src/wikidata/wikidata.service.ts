@@ -34,7 +34,10 @@ export class WikidataService {
   /**
    * canonical_en 기반 검색 (language=en 고정)
    */
-  async searchByEnglishLabel(query: string, limit = 5): Promise<WikidataSearchItem[]> {
+  async searchByEnglishLabel(
+    query: string,
+    limit = 5,
+  ): Promise<WikidataSearchItem[]> {
     const q = query.trim();
     if (!q) return [];
 
@@ -104,11 +107,11 @@ export class WikidataService {
 
       for (const row of bindings) {
         const propertyIri: string = row.property.value; // e.g. "http://www.wikidata.org/prop/direct/P31"
-        const valueIri: string = row.value.value;       // e.g. "http://www.wikidata.org/entity/Q12345"
+        const valueIri: string = row.value.value; // e.g. "http://www.wikidata.org/entity/Q12345"
         const valueLabel: string = row.valueLabel?.value ?? '';
 
         const pid = propertyIri.split('/').pop(); // "P31" etc.
-        const neighborQid = valueIri.split('/').pop();   // "Qxxxx"
+        const neighborQid = valueIri.split('/').pop(); // "Qxxxx"
 
         if (!neighborQid || !valueLabel) continue;
 

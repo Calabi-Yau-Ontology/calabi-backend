@@ -2,14 +2,16 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Neo4jService } from 'src/neo4j/neo4j.service';
 import { Event } from 'src/events/entities/event.entity';
 import { User } from 'src/users/entities/user.entity';
-import { NerResponseDto } from 'src/suggestions/dto/ner-response.dto';
+import { NERResponseDto } from 'src/suggestions/dto/ner-response.dto';
+import { normalizeSurfaceForm } from 'src/common/utils/text-normalize';
 
-import { NER_TO_CONCEPT_TYPE } from './constants/concept-mapping';
+import {
+  ConceptType,
+  NER_TO_CONCEPT_TYPE,
+  isAllowedNERLabel,
+} from './constants/concept.types';
 import { RELATIONS } from './constants/relations';
 import { ExpansionService } from './expansion/expansion.service';
-
-const CONCEPT_TYPE_LABELS = ['ActivityType', 'Location', 'Person', 'Project', 'Interest'] as const;
-type ConceptType = (typeof CONCEPT_TYPE_LABELS)[number];
 
 @Injectable()
 export class OntologyService {
@@ -20,9 +22,9 @@ export class OntologyService {
     private readonly expansionService: ExpansionService,
   ) {}
 
-  private toDateTimeString(date?: Date | null): string | null {
-    return date ? date.toISOString() : null;
-  }
+  // ---------------------------------------------------------------------------
+  // Public upsert/link operations
+  // ---------------------------------------------------------------------------
 
   async upsertUser(user: User) {
     const cypher = `
@@ -49,8 +51,10 @@ export class OntologyService {
       location: event.location ?? null,
       startTime: this.toDateTimeString(event.startTime),
       endTime: this.toDateTimeString(event.endTime ?? null),
-      createdAt: this.toDateTimeString(event.createdAt) ?? new Date().toISOString(),
-      updatedAt: this.toDateTimeString(event.updatedAt) ?? new Date().toISOString(),
+      createdAt:
+        this.toDateTimeString(event.createdAt) ?? new Date().toISOString(),
+      updatedAt:
+        this.toDateTimeString(event.updatedAt) ?? new Date().toISOString(),
     };
 
     if (options?.requireExisting) {
@@ -66,7 +70,9 @@ export class OntologyService {
       `;
       const result = await this.neo4j.run(cypher, params);
       if (!result.records.length) {
-        throw new NotFoundException(`Event node (${event.id}) not found in Neo4j for update`);
+        throw new NotFoundException(
+          `Event node (${event.id}) not found in Neo4j for update`,
+        );
       }
       return result;
     }
@@ -169,7 +175,7 @@ export class OntologyService {
   async processEventOntology(
     user: User,
     event: Event,
-    ner: NerResponseDto,
+    ner: NERResponseDto,
     options?: { mode?: 'create' | 'update' },
   ) {
     const mentions = ner?.mentions ?? [];
@@ -179,55 +185,174 @@ export class OntologyService {
       this.upsertUser(user),
       this.upsertEvent(event, { requireExisting: mode === 'update' }),
     ]);
-    await Promise.all([this.linkUserToEvent(user.id, event.id), this.clearEventConceptLinks(event.id)]);
+    await Promise.all([
+      this.linkUserToEvent(user.id, event.id),
+      this.clearEventConceptLinks(event.id),
+    ]);
 
     const conceptMap = new Map<
       string,
       {
         conceptType: ConceptType;
-        provenance: string | null;
+        surface: string | null;
       }
     >();
 
     for (const m of mentions) {
       const label = m?.ner?.label;
-      const mappedType = NER_TO_CONCEPT_TYPE[label] ?? 'None';
-      if (mappedType === 'None') continue;
+      if (!isAllowedNERLabel(label)) continue;
+      const mappedType = NER_TO_CONCEPT_TYPE[label];
 
       const canonicalName = m?.canonical?.en?.trim();
       if (!canonicalName || conceptMap.has(canonicalName)) continue;
 
       conceptMap.set(canonicalName, {
-        conceptType: mappedType as ConceptType,
-        provenance: m?.surface?.trim() ?? null,
+        conceptType: mappedType,
+        surface: m?.surface?.trim() ?? null,
       });
     }
 
-    const concepts = Array.from(conceptMap.entries()).map(([canonicalName, value]) => ({
-      canonicalName,
-      conceptType: value.conceptType,
-      provenance: value.provenance,
-    }));
+    const concepts = Array.from(conceptMap.entries()).map(
+      ([canonicalName, value]) => ({
+        canonicalName,
+        conceptType: value.conceptType,
+        surface: value.surface,
+      }),
+    );
 
     await Promise.all(
-      concepts.map(async ({ canonicalName, conceptType, provenance }) => {
-        await this.upsertConceptWithProps(canonicalName, conceptType, {
-          provenance,
+      concepts.map(async ({ canonicalName, conceptType, surface }) => {
+        const conceptProps: Record<string, any> = {
           source: 'ml',
-        });
+        };
+        if (surface) {
+          conceptProps.provenance = surface;
+        }
+
+        await this.upsertConceptWithProps(
+          canonicalName,
+          conceptType,
+          conceptProps,
+        );
         await Promise.all([
           this.linkEventToConcept(event.id, canonicalName),
           this.linkUserToConcept(user.id, canonicalName),
+          this.recordSurfaceForm(
+            user.id,
+            event.id,
+            canonicalName,
+            conceptType,
+            surface,
+          ),
         ]);
       }),
     );
 
     for (const { canonicalName } of concepts) {
-      void this.expansionService.expandConceptByName(canonicalName).catch((e: any) => {
-        this.logger.warn(
-          `Wikidata expansion skipped for "${canonicalName}": ${e?.message ?? e}`,
-        );
-      });
+      void this.expansionService
+        .expandConceptByName(canonicalName)
+        .catch((error: unknown) => {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          this.logger.warn(
+            `Wikidata expansion skipped for "${canonicalName}": ${message}`,
+          );
+        });
     }
   }
+
+  private async recordSurfaceForm(
+    userId: string,
+    eventId: string,
+    conceptName: string,
+    conceptType: ConceptType,
+    surface: string | null,
+  ): Promise<void> {
+    const normalized = normalizeSurfaceForm(surface ?? '');
+    if (!normalized) return;
+
+    const key = `${conceptType}::${conceptName}::${normalized}`;
+    const now = new Date().toISOString();
+
+    const params = {
+      conceptName,
+      conceptType,
+      surface,
+      normalized,
+      key,
+      now,
+      userId,
+      eventId,
+    };
+
+    await this.upsertSurfaceFormNode(params);
+    await this.linkUserToSurfaceForm(params);
+  }
+
+  private async upsertSurfaceFormNode(
+    params: SurfaceFormParams,
+  ): Promise<void> {
+    const cypher = `
+      MATCH (c:Concept { name: $conceptName, type: $conceptType })
+      MERGE (sf:SurfaceForm { key: $key })
+      ON CREATE SET
+        sf.value = $surface,
+        sf.normalized = $normalized,
+        sf.createdAt = datetime($now),
+        sf.updatedAt = datetime($now),
+        sf.usageCount = 0,
+        sf.conceptName = $conceptName,
+        sf.conceptType = $conceptType
+      SET
+        sf.value = COALESCE($surface, sf.value),
+        sf.updatedAt = datetime($now),
+        sf.normalized = $normalized,
+        sf.usageCount = COALESCE(sf.usageCount, 0) + 1,
+        sf.lastUsedAt = datetime($now),
+        sf.lastUsedBy = $userId,
+        sf.lastUsedEventId = $eventId
+      MERGE (sf)-[r:${RELATIONS.SURFACE_OF}]->(c)
+      ON CREATE SET r.createdAt = datetime($now)
+      SET r.updatedAt = datetime($now)
+    `;
+    await this.neo4j.run(cypher, params);
+  }
+
+  private async linkUserToSurfaceForm(
+    params: SurfaceFormParams,
+  ): Promise<void> {
+    const cypher = `
+      MATCH (u:User { id: $userId })
+      MATCH (sf:SurfaceForm { key: $key })
+      MERGE (u)-[us:${RELATIONS.USED_SURFACE}]->(sf)
+      ON CREATE SET
+        us.createdAt = datetime($now),
+        us.usageCount = 0
+      SET
+        us.updatedAt = datetime($now),
+        us.usageCount = COALESCE(us.usageCount, 0) + 1,
+        us.lastUsedAt = datetime($now),
+        us.lastUsedEventId = $eventId
+    `;
+    await this.neo4j.run(cypher, params);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Utility helpers
+  // ---------------------------------------------------------------------------
+
+  private toDateTimeString(date?: Date | null): string | null {
+    return date ? date.toISOString() : null;
+  }
 }
+
+type SurfaceFormParams = {
+  conceptName: string;
+  conceptType: ConceptType;
+  surface: string | null;
+  normalized: string;
+  key: string;
+  now: string;
+  userId: string;
+  eventId: string;
+};

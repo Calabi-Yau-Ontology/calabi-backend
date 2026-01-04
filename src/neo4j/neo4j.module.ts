@@ -22,7 +22,6 @@ import { NEO4J_SCHEMA_STATEMENTS } from './neo4j.schema';
   ],
   exports: ['NEO4J_DRIVER', Neo4jService],
 })
-
 export class Neo4jModule implements OnModuleInit {
   private readonly logger = new Logger(Neo4jModule.name);
   constructor(private readonly neo4j: Neo4jService) {}
@@ -32,7 +31,10 @@ export class Neo4jModule implements OnModuleInit {
       try {
         await this.neo4j.run(stmt, {});
       } catch (e: any) {
-        this.logger.error(`Neo4j schema apply failed: ${e?.message ?? e}`, e?.stack);
+        this.logger.error(
+          `Neo4j schema apply failed: ${e?.message ?? e}`,
+          e?.stack,
+        );
         throw e;
       }
     }

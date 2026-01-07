@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { EventsService } from './events.service';
 import { EventsController } from './events.controller';
+import { EventsStreamController } from './events.stream.controller';
 import { Event } from './entities/event.entity';
 import { Category } from '../categories/entities/category.entity';
 import { UsersModule } from 'src/users/users.module';
@@ -31,7 +32,7 @@ import { ONTOLOGY_QUEUE_NAME } from 'src/ontology/types/ontology-queue-job';
       },
     ]),
   ],
-  controllers: [EventsController],
+  controllers: [EventsController, EventsStreamController],
   providers: [EventsService],
 })
 export class EventsModule {}

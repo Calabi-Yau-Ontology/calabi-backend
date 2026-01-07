@@ -1,5 +1,6 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { Transport, type MicroserviceOptions } from '@nestjs/microservices';
 import { AppModule } from './app.module';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -54,6 +55,20 @@ async function bootstrap() {
     customSiteTitle: 'Calabi API 문서',
   });
 
+  app.connectMicroservice<MicroserviceOptions>({
+    transport: Transport.KAFKA,
+    options: {
+      client: {
+        clientId: 'calabi-backend-gateway',
+        brokers: ['localhost:9092'],
+      },
+      consumer: {
+        groupId: 'calabi-backend-gateway-consumer',
+      },
+    },
+  });
+
+  await app.startAllMicroservices();
   await app.listen(process.env.PORT ?? 4000);
 }
 void bootstrap();

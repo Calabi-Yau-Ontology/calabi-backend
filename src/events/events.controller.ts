@@ -21,7 +21,6 @@ import {
   ApiUnauthorizedResponse,
   ApiParam,
 } from '@nestjs/swagger';
-import { Ctx, EventPattern, KafkaContext, Payload } from '@nestjs/microservices';
 import { EventsService } from './events.service';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
@@ -212,33 +211,6 @@ export class EventsController {
     return this.eventsService.remove(userId, id);
   }
 
-  @EventPattern('event-stream')
-  handleEventStream(
-    @Payload() message: any,
-    @Ctx() context: KafkaContext,
-  ): void {
-    const key = message?.key?.toString?.() ?? null;
-    const rawValue = message?.value?.toString
-      ? message.value.toString()
-      : message?.value;
-
-    let parsed: unknown = rawValue;
-    if (typeof rawValue === 'string') {
-      try {
-        parsed = JSON.parse(rawValue);
-      } catch {
-        parsed = rawValue;
-      }
-    }
-
-    // eslint-disable-next-line no-console
-    console.log('Real-time Event Log', {
-      key,
-      value: parsed,
-      partition: context.getPartition(),
-      offset: context.getMessage().offset,
-    });
-  }
 }
 
 type AuthenticatedRequest = RequestWithUser;

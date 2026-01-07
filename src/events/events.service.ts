@@ -1,4 +1,6 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bull';
+import type { Queue } from 'bull';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Event } from './entities/event.entity';
@@ -7,9 +9,13 @@ import { UpdateEventDto } from './dto/update-event.dto';
 import { UsersService } from '../users/users.service';
 import { User } from 'src/users/entities/user.entity';
 import { OntologyService } from 'src/ontology/ontology.service';
-import { SuggestionsService } from 'src/suggestions/suggestions.service';
 import { Category } from '../categories/entities/category.entity';
 import { ERROR_MESSAGES } from 'src/common/constants/error-messages';
+import {
+  ONTOLOGY_QUEUE_NAME,
+  OntologyQueueJob,
+  PROCESS_EVENT_ONTOLOGY_JOB,
+} from 'src/ontology/types/ontology-queue-job';
 
 @Injectable()
 export class EventsService {
@@ -22,7 +28,8 @@ export class EventsService {
     private readonly categoriesRepo: Repository<Category>,
     private readonly usersService: UsersService,
     private readonly ontologyService: OntologyService,
-    private readonly suggestionsService: SuggestionsService,
+    @InjectQueue(ONTOLOGY_QUEUE_NAME)
+    private readonly ontologyQueue: Queue<OntologyQueueJob>,
   ) {}
 
   async create(userId: string, dto: CreateEventDto): Promise<Event> {
@@ -52,7 +59,7 @@ export class EventsService {
     const saved = await this.eventsRepo.save(event);
 
     // NER + 온톨로지 처리를 비동기로 큐잉하여 API 응답을 빠르게 반환
-    this.triggerOntologyProcessing(user, saved, 'create', dto.cacheToken);
+    void this.triggerOntologyProcessing(user, saved, 'create', dto.cacheToken);
 
     return saved;
   }
@@ -105,7 +112,7 @@ export class EventsService {
     const saved = await this.eventsRepo.save(event);
 
     // NER + 온톨로지 처리를 비동기로 큐잉하여 API 응답을 빠르게 반환
-    this.triggerOntologyProcessing(user, saved, 'update', dto.cacheToken);
+    void this.triggerOntologyProcessing(user, saved, 'update', dto.cacheToken);
 
     return saved;
   }
@@ -126,12 +133,12 @@ export class EventsService {
     return { deleted: true };
   }
 
-  private triggerOntologyProcessing(
+  private async triggerOntologyProcessing(
     user: User,
     event: Event,
     mode: 'create' | 'update',
     cacheToken?: string | null,
-  ): void {
+  ): Promise<void> {
     const owner = event.user ?? user;
     if (!owner) {
       this.logger.warn(
@@ -140,34 +147,26 @@ export class EventsService {
       return;
     }
 
-    const text = (event.title ?? '').trim();
     const normalizedToken = cacheToken?.trim();
+    const jobPayload: OntologyQueueJob = {
+      userId: owner.id,
+      eventId: event.id,
+      mode,
+      cacheToken: normalizedToken?.length ? normalizedToken : null,
+    };
 
-    void (async () => {
-      try {
-        const cached = normalizedToken?.length
-          ? await this.suggestionsService.consumeCachedNER(
-              normalizedToken,
-              owner.id,
-            )
-          : null;
-        const nerResult =
-          cached ?? (await this.suggestionsService.runNER({ text }));
-        await this.ontologyService.processEventOntology(
-          owner,
-          event,
-          nerResult,
-          {
-            mode,
-          },
-        );
-      } catch (error) {
-        const err = error as Error;
-        this.logger.error(
-          `Failed to process ontology for event ${event.id} (${mode}): ${err?.message ?? err}`,
-          err?.stack,
-        );
-      }
-    })();
+    try {
+      await this.ontologyQueue.add(PROCESS_EVENT_ONTOLOGY_JOB, jobPayload, {
+        jobId: event.id,
+        delay: 1000,
+        removeOnComplete: true,
+      });
+    } catch (error) {
+      const err = error as Error;
+      this.logger.error(
+        `Failed to enqueue ontology job for event ${event.id}: ${err?.message ?? err}`,
+        err?.stack,
+      );
+    }
   }
 }

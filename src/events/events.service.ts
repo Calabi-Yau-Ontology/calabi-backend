@@ -156,6 +156,11 @@ export class EventsService {
     };
 
     try {
+      const existingJob = await this.ontologyQueue.getJob(event.id);
+      if (existingJob) {
+        await existingJob.remove();
+      }
+
       await this.ontologyQueue.add(PROCESS_EVENT_ONTOLOGY_JOB, jobPayload, {
         jobId: event.id,
         delay: 1000,

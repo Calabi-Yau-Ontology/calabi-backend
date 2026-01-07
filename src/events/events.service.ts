@@ -1,8 +1,17 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bull';
 import type { Queue } from 'bull';
+import { ClientKafka } from '@nestjs/microservices';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { lastValueFrom } from 'rxjs';
 import { Event } from './entities/event.entity';
 import { CreateEventDto } from './dto/create-event.dto';
 import { UpdateEventDto } from './dto/update-event.dto';
@@ -18,8 +27,9 @@ import {
 } from 'src/ontology/types/ontology-queue-job';
 
 @Injectable()
-export class EventsService {
+export class EventsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(EventsService.name);
+  private kafkaReady = false;
 
   constructor(
     @InjectRepository(Event)
@@ -30,7 +40,38 @@ export class EventsService {
     private readonly ontologyService: OntologyService,
     @InjectQueue(ONTOLOGY_QUEUE_NAME)
     private readonly ontologyQueue: Queue<OntologyQueueJob>,
+    @Inject('EVENT_KAFKA_CLIENT')
+    private readonly kafkaClient: ClientKafka,
   ) {}
+
+  async onModuleInit(): Promise<void> {
+    try {
+      await this.kafkaClient.connect();
+      this.kafkaReady = true;
+    } catch (error) {
+      const err = error as Error;
+      this.kafkaReady = false;
+      this.logger.warn(
+        `Kafka client connection skipped: ${err?.message ?? err}`,
+        err?.stack,
+      );
+    }
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    if (!this.kafkaReady) {
+      return;
+    }
+    try {
+      await this.kafkaClient.close();
+    } catch (error) {
+      const err = error as Error;
+      this.logger.warn(
+        `Kafka client close failed: ${err?.message ?? err}`,
+        err?.stack,
+      );
+    }
+  }
 
   async create(userId: string, dto: CreateEventDto): Promise<Event> {
     const user = await this.usersService.findOne(userId);
@@ -58,8 +99,7 @@ export class EventsService {
     // return this.eventsRepo.save(event);
     const saved = await this.eventsRepo.save(event);
 
-    // NER + 온톨로지 처리를 비동기로 큐잉하여 API 응답을 빠르게 반환
-    void this.triggerOntologyProcessing(user, saved, 'create', dto.cacheToken);
+    this.dispatchEventSideEffects(user, saved, 'create', dto.cacheToken);
 
     return saved;
   }
@@ -111,8 +151,7 @@ export class EventsService {
     // return this.eventsRepo.save(event);
     const saved = await this.eventsRepo.save(event);
 
-    // NER + 온톨로지 처리를 비동기로 큐잉하여 API 응답을 빠르게 반환
-    void this.triggerOntologyProcessing(user, saved, 'update', dto.cacheToken);
+    this.dispatchEventSideEffects(user, saved, 'update', dto.cacheToken);
 
     return saved;
   }
@@ -131,6 +170,18 @@ export class EventsService {
       );
     }
     return { deleted: true };
+  }
+
+  private dispatchEventSideEffects(
+    user: User,
+    event: Event,
+    mode: 'create' | 'update',
+    cacheToken?: string | null,
+  ): void {
+    void Promise.allSettled([
+      this.triggerOntologyProcessing(user, event, mode, cacheToken),
+      this.publishToKafka(event, user, mode),
+    ]);
   }
 
   private async triggerOntologyProcessing(
@@ -170,6 +221,39 @@ export class EventsService {
       const err = error as Error;
       this.logger.error(
         `Failed to enqueue ontology job for event ${event.id}: ${err?.message ?? err}`,
+        err?.stack,
+      );
+    }
+  }
+
+  private async publishToKafka(
+    event: Event,
+    user: User,
+    action: 'create' | 'update',
+  ): Promise<void> {
+    if (!this.kafkaReady) {
+      return;
+    }
+
+    const payload = {
+      eventId: event.id,
+      userId: user.id,
+      action,
+      title: event.title,
+      timestamp: Date.now(),
+    };
+
+    try {
+      await lastValueFrom(
+        this.kafkaClient.emit('event-stream', {
+          key: event.id,
+          value: JSON.stringify(payload),
+        }),
+      );
+    } catch (error) {
+      const err = error as Error;
+      this.logger.warn(
+        `Kafka publish failed for event ${event.id}: ${err?.message ?? err}`,
         err?.stack,
       );
     }

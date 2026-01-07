@@ -30,10 +30,7 @@ export class OntologyProcessor {
     const { eventId, userId, mode, cacheToken } = job.data;
 
     try {
-      const event = await this.eventsRepo.findOne({
-        where: { id: eventId },
-        relations: { user: true },
-      });
+      const event = await this.eventsRepo.findOne({ where: { id: eventId } });
       if (!event) {
         this.logger.warn(
           `Skip ontology processing for job ${job.id}: event ${eventId} not found`,
@@ -41,7 +38,7 @@ export class OntologyProcessor {
         return;
       }
 
-      const owner = event.user ?? (await this.usersService.findOne(userId));
+      const owner = await this.usersService.findOne(userId);
       if (!owner) {
         this.logger.warn(
           `Skip ontology processing for job ${job.id}: user ${userId} not found`,

@@ -7,5 +7,4 @@ export interface OntologyQueueJob {
   userId: string;
   eventId: string;
   mode: OntologyJobMode;
-  cacheToken?: string | null;
 }

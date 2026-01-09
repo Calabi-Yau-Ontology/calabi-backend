@@ -53,13 +53,6 @@ export class CreateEventDto {
   @MaxLength(255)
   location?: string;
 
-  @ApiPropertyOptional({
-    description: 'NER 캐시 토큰',
-  })
-  @IsOptional()
-  @IsString()
-  cacheToken?: string;
-
   @ApiProperty({
     description: '연결할 카테고리 ID',
     example: '8c05fe4b-34dc-45fd-9b31-c5fcf768f9d5',

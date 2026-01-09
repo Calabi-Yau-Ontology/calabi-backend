@@ -25,6 +25,11 @@ import {
   OntologyQueueJob,
   PROCESS_EVENT_ONTOLOGY_JOB,
 } from 'src/ontology/types/ontology-queue-job';
+import { NerCacheService } from 'src/suggestions/cache/ner-cache.service';
+import {
+  buildEventNerCacheKey,
+  normalizeEventTitle,
+} from './utils/event-ner-cache.util';
 
 @Injectable()
 export class EventsService implements OnModuleInit, OnModuleDestroy {
@@ -42,6 +47,7 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
     private readonly ontologyQueue: Queue<OntologyQueueJob>,
     @Inject('EVENT_KAFKA_CLIENT')
     private readonly kafkaClient: ClientKafka,
+    private readonly nerCacheService: NerCacheService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -96,10 +102,11 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
       location: dto.location,
     });
 
-    // return this.eventsRepo.save(event);
     const saved = await this.eventsRepo.save(event);
 
-    this.dispatchEventSideEffects(user, saved, 'create', dto.cacheToken);
+    await this.syncEventNerCacheMetadata(saved);
+
+    this.dispatchEventSideEffects(user, saved, 'create');
 
     return saved;
   }
@@ -132,6 +139,8 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
       throw new NotFoundException(ERROR_MESSAGES.USER.NOT_FOUND);
     }
 
+    const previousCacheKey = event.nerCacheKey ?? null;
+
     if (dto.title !== undefined) event.title = dto.title;
     if (dto.description !== undefined) event.description = dto.description;
     if (dto.startTime !== undefined) event.startTime = new Date(dto.startTime);
@@ -148,10 +157,11 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
       event.category = category;
     }
 
-    // return this.eventsRepo.save(event);
     const saved = await this.eventsRepo.save(event);
 
-    this.dispatchEventSideEffects(user, saved, 'update', dto.cacheToken);
+    await this.syncEventNerCacheMetadata(saved, previousCacheKey);
+
+    this.dispatchEventSideEffects(user, saved, 'update');
 
     return saved;
   }
@@ -159,7 +169,11 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
   async remove(userId: string, id: string): Promise<{ deleted: boolean }> {
     const event = await this.findOneByUser(userId, id);
     const eventId = event.id;
+    const cacheKey = event.nerCacheKey ?? null;
     await this.eventsRepo.remove(event);
+    if (cacheKey) {
+      await this.removeEventCacheEntry(cacheKey);
+    }
     try {
       await this.ontologyService.removeEvent(eventId);
     } catch (error) {
@@ -176,10 +190,9 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
     user: User,
     event: Event,
     mode: 'create' | 'update',
-    cacheToken?: string | null,
   ): void {
     void Promise.allSettled([
-      this.triggerOntologyProcessing(user, event, mode, cacheToken),
+      this.triggerOntologyProcessing(user, event, mode),
       this.publishToKafka(event, user, mode),
     ]);
   }
@@ -188,7 +201,6 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
     user: User,
     event: Event,
     mode: 'create' | 'update',
-    cacheToken?: string | null,
   ): Promise<void> {
     const owner = event.user ?? user;
     if (!owner) {
@@ -198,12 +210,10 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
-    const normalizedToken = cacheToken?.trim();
     const jobPayload: OntologyQueueJob = {
       userId: owner.id,
       eventId: event.id,
       mode,
-      cacheToken: normalizedToken?.length ? normalizedToken : null,
     };
 
     try {
@@ -221,6 +231,66 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
       const err = error as Error;
       this.logger.error(
         `Failed to enqueue ontology job for event ${event.id}: ${err?.message ?? err}`,
+        err?.stack,
+      );
+    }
+  }
+
+  private async syncEventNerCacheMetadata(
+    event: Event,
+    previousKey?: string | null,
+  ): Promise<void> {
+    try {
+      const normalizedTitle = normalizeEventTitle(event.title);
+      if (!normalizedTitle) {
+        if (previousKey) {
+          await this.removeEventCacheEntry(previousKey);
+        }
+        await this.eventsRepo.update(event.id, {
+          nerCacheKey: null,
+          nerCacheStatus: null,
+        });
+        event.nerCacheKey = null;
+        event.nerCacheStatus = null;
+        return;
+      }
+
+      const nextKey = buildEventNerCacheKey(event.id, normalizedTitle);
+      const hasNewKey = !previousKey || previousKey !== nextKey;
+      if (hasNewKey && previousKey) {
+        await this.removeEventCacheEntry(previousKey);
+      }
+
+      const nextStatus = hasNewKey
+        ? ('pending' as const)
+        : event.nerCacheStatus ?? ('ready' as const);
+
+      await this.eventsRepo.update(event.id, {
+        nerCacheKey: nextKey,
+        nerCacheStatus: nextStatus,
+      });
+
+      event.nerCacheKey = nextKey;
+      event.nerCacheStatus = nextStatus;
+    } catch (error) {
+      const err = error as Error;
+      this.logger.warn(
+        `Failed to update NER cache metadata for event ${event.id}: ${err?.message ?? err}`,
+        err?.stack,
+      );
+    }
+  }
+
+  private async removeEventCacheEntry(cacheKey?: string | null): Promise<void> {
+    if (!cacheKey) {
+      return;
+    }
+    try {
+      await this.nerCacheService.remove(cacheKey);
+    } catch (error) {
+      const err = error as Error;
+      this.logger.warn(
+        `Failed to remove NER cache entry ${cacheKey}: ${err?.message ?? err}`,
         err?.stack,
       );
     }

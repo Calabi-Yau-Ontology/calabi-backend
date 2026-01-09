@@ -10,7 +10,7 @@ import {
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 import { Category } from '../../categories/entities/category.entity';
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 @Entity('events')
 export class Event {
@@ -93,4 +93,21 @@ export class Event {
   })
   @UpdateDateColumn()
   updatedAt!: Date;
+
+  @ApiPropertyOptional({
+    description: 'NER 캐시 키',
+    nullable: true,
+  })
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  nerCacheKey?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'NER 캐시 상태',
+    enum: ['pending', 'ready', 'error', 'consumed'],
+    nullable: true,
+  })
+  @Column({ type: 'varchar', length: 16, nullable: true })
+  nerCacheStatus?: EventNerCacheStatus | null;
 }
+
+export type EventNerCacheStatus = 'pending' | 'ready' | 'error' | 'consumed';

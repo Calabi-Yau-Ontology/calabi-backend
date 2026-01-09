@@ -1,16 +1,31 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { AxiosError, isAxiosError } from 'axios';
 import neo4j from 'neo4j-driver';
 import type { Node, Record as Neo4jRecord, Relationship } from 'neo4j-driver';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { Neo4jService } from 'src/neo4j/neo4j.service';
 import { RELATIONS } from 'src/ontology/constants/relations';
-import { isAllowedNERLabel } from 'src/ontology/constants/concept.types';
+import { ConceptType, isAllowedNERLabel } from 'src/ontology/constants/concept.types';
 import { NerCacheService } from './cache/ner-cache.service';
 import type { NERResponseDto } from './dto/ner-response.dto';
 import type { RunNERDto } from './dto/run-ner.dto';
+import { ConsistencyCheckRequestDto } from './dto/consistency-request.dto';
+import {
+  ConsistencyDecisionAction,
+  ConsistencyDecisionPairDto,
+  ConsistencyDecisionRequestDto,
+} from './dto/consistency-decision.dto';
 import type {
   AutocompleteResponseDto,
   AutocompleteSuggestionDto,
@@ -20,7 +35,6 @@ import type {
   ConsistencyRecommendationDto,
   SurfaceRecommendationDto,
   RecommendationReason,
-  ConsistencyErrorDto,
 } from './dto/consistency-response.dto';
 import {
   extractConcept,
@@ -35,6 +49,16 @@ import type {
   ConsistencyRecommendationRow,
   SurfaceRecommendationRowEntry,
 } from './types/graph.types';
+import { Event } from 'src/events/entities/event.entity';
+import {
+  EVENT_NER_CACHE_POLL_INTERVAL_MS,
+  EVENT_NER_CACHE_TIMEOUT_MS,
+  EVENT_NER_CACHE_TTL_SECONDS,
+  buildEventNerCacheKey,
+  normalizeEventTitle,
+} from 'src/events/utils/event-ner-cache.util';
+import { ERROR_MESSAGES } from 'src/common/constants/error-messages';
+import { normalizeSurfaceForm } from 'src/common/utils/text-normalize';
 
 const AUTOCOMPLETE_DEFAULT_LIMIT = 5;
 const AUTOCOMPLETE_MAX_LIMIT = 10;
@@ -49,6 +73,8 @@ export class SuggestionsService {
     private readonly configService: ConfigService,
     private readonly neo4j: Neo4jService,
     private readonly nerCacheService: NerCacheService,
+    @InjectRepository(Event)
+    private readonly eventsRepo: Repository<Event>,
   ) {
     const mlConfig = this.configService.get<{ baseUrl: string }>('ml');
     this.baseUrl = mlConfig?.baseUrl ?? '';
@@ -111,58 +137,364 @@ export class SuggestionsService {
   }
 
   /**
-   * NER 기반 일관성 검사: NER 결과 캐싱 후, 기존 SurfaceForm 통계를 조회해 추천.
+   * NER 기반 일관성 검사: 이벤트 캐시 또는 즉석 텍스트 기반으로 추천을 반환한다.
    */
   async runConsistencyCheck(
+    userId: string,
+    dto: ConsistencyCheckRequestDto,
+  ): Promise<ConsistencyCheckResponseDto> {
+    if (dto.eventId) {
+      return this.runEventConsistencyCheck(userId, dto.eventId);
+    }
+    const text = dto.text?.trim() ?? '';
+    return this.runAdhocConsistencyCheck(userId, text);
+  }
+
+  private async runAdhocConsistencyCheck(
     userId: string,
     text: string,
   ): Promise<ConsistencyCheckResponseDto> {
     const cleanedText = text?.trim() ?? '';
     const ner = await this.runNER({ text: cleanedText });
-    const nerErrors = this.mapConsistencyErrors(ner.errors);
-    const cacheToken = await this.nerCacheService.store(
+    this.raiseIfNerFailed(ner);
+    await this.nerCacheService.store(
       userId,
       cleanedText,
       ner,
     );
+    return this.buildConsistencyResponse(userId, ner);
+  }
 
+  private async runEventConsistencyCheck(
+    userId: string,
+    eventId: string,
+  ): Promise<ConsistencyCheckResponseDto> {
+    const event = await this.eventsRepo.findOne({
+      where: { id: eventId, user: { id: userId } },
+    });
+    if (!event) {
+      throw new NotFoundException(ERROR_MESSAGES.EVENT.NOT_FOUND);
+    }
+
+    const normalizedTitle = normalizeEventTitle(event.title);
+    if (!normalizedTitle) {
+      throw new BadRequestException('Event title is empty');
+    }
+
+    const cacheKey = await this.ensureEventCacheKey(event, normalizedTitle);
+
+    const ner = await this.waitForEventNerCache(cacheKey, userId);
+    if (!ner) {
+      this.logger.warn(
+        `Consistency check timeout for event ${eventId} (user: ${userId})`,
+      );
+      throw new ServiceUnavailableException('NER processing timeout');
+    }
+    this.raiseIfNerFailed(ner);
+
+    return this.buildConsistencyResponse(userId, ner);
+  }
+
+  private async waitForEventNerCache(
+    cacheKey: string,
+    userId: string,
+  ): Promise<NERResponseDto | null> {
+    const deadline = Date.now() + EVENT_NER_CACHE_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      const cached = await this.nerCacheService.resolve(cacheKey, userId);
+      if (cached) {
+        await this.nerCacheService.refreshTTL(
+          cacheKey,
+          EVENT_NER_CACHE_TTL_SECONDS,
+        );
+        return cached;
+      }
+      await this.delay(EVENT_NER_CACHE_POLL_INTERVAL_MS);
+    }
+    return null;
+  }
+
+  private async ensureEventCacheKey(
+    event: Event,
+    normalizedTitle: string,
+  ): Promise<string> {
+    const expectedKey = buildEventNerCacheKey(event.id, normalizedTitle);
+    const existingKey = event.nerCacheKey?.trim() ?? null;
+
+    if (existingKey && existingKey !== expectedKey) {
+      await this.nerCacheService.remove(existingKey);
+    }
+
+    if (!existingKey || existingKey !== expectedKey) {
+      await this.eventsRepo.update(event.id, {
+        nerCacheKey: expectedKey,
+        nerCacheStatus: 'pending',
+      });
+      event.nerCacheKey = expectedKey;
+    }
+
+    return expectedKey;
+  }
+
+  private async buildConsistencyResponse(
+    userId: string,
+    ner: NERResponseDto,
+  ): Promise<ConsistencyCheckResponseDto> {
     const canonicalMentions = this.extractCanonicalMentions(ner);
+
     if (!canonicalMentions.length) {
       return {
-        cacheToken,
         results: [],
-        errors: nerErrors,
       };
     }
 
-    let rows: ConsistencyRecommendationRow[] = [];
     try {
-      rows = await this.fetchConsistencyRows(userId, canonicalMentions);
+      const rows = await this.fetchConsistencyRows(userId, canonicalMentions);
+      const results: ConsistencyRecommendationDto[] = rows
+        .map((row) => this.mapConsistencyRow(row))
+        .filter((row): row is ConsistencyRecommendationDto => row !== null);
+      return {
+        results,
+      };
     } catch (error: unknown) {
       const message = this.extractErrorMessage(error);
       this.logger.error(
         `Consistency query failed for user ${userId}: ${message}`,
         this.extractErrorStack(error),
       );
-      const errors: ConsistencyErrorDto[] = [
-        ...(nerErrors ?? []),
-        { stage: 'neo4j', message },
-      ];
-      return {
-        cacheToken,
-        results: [],
-        errors,
-      };
+      throw new ServiceUnavailableException(message);
     }
-    const results: ConsistencyRecommendationDto[] = rows
-      .map((row) => this.mapConsistencyRow(row))
-      .filter((row): row is ConsistencyRecommendationDto => row !== null);
+  }
 
-    return {
-      cacheToken,
-      results,
-      errors: nerErrors,
-    };
+  private async delay(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async confirmConsistencyDecision(
+    userId: string,
+    dto: ConsistencyDecisionRequestDto,
+  ): Promise<void> {
+    const event = await this.eventsRepo.findOne({
+      where: { id: dto.eventId, user: { id: userId } },
+    });
+    if (!event) {
+      throw new NotFoundException(ERROR_MESSAGES.EVENT.NOT_FOUND);
+    }
+
+    const existingKey = event.nerCacheKey?.trim() ?? null;
+
+    if (dto.action === ConsistencyDecisionAction.Applied) {
+      const beforeTitle = dto.beforeTitle?.trim() ?? '';
+      const afterTitle = dto.afterTitle?.trim() ?? '';
+      const pairs = dto.pairs ?? [];
+      if (!beforeTitle) {
+        throw new BadRequestException('Before title is required');
+      }
+      if (!afterTitle) {
+        throw new BadRequestException('After title is required');
+      }
+      if (!pairs.length) {
+        throw new BadRequestException('Pairs are required');
+      }
+      if (
+        normalizeEventTitle(beforeTitle) !==
+        normalizeEventTitle(event.title)
+      ) {
+        throw new ConflictException('Event title has changed');
+      }
+
+      const appliedMentions = this.extractAppliedPairs(pairs);
+      if (appliedMentions.length) {
+        await this.recordAppliedSurfaceUsage(userId, event.id, appliedMentions);
+      }
+
+      event.title = afterTitle;
+      if (existingKey) {
+        await this.nerCacheService.remove(existingKey);
+      }
+      event.nerCacheKey = null;
+      event.nerCacheStatus = 'consumed';
+      const savedEvent = await this.eventsRepo.save(event);
+      await this.updateOntologyEventTitle(savedEvent);
+      return;
+    }
+
+    if (existingKey) {
+      await this.nerCacheService.remove(existingKey);
+    }
+    event.nerCacheKey = null;
+    event.nerCacheStatus = 'consumed';
+    await this.eventsRepo.save(event);
+  }
+
+  private extractAppliedPairs(
+    pairs: ConsistencyDecisionPairDto[],
+  ): Array<{
+    canonicalName: string;
+    conceptType: ConceptType;
+    surface: string;
+    normalized: string;
+  }> {
+    const appliedMap = new Map<
+      string,
+      {
+        canonicalName: string;
+        conceptType: ConceptType;
+        surface: string;
+        normalized: string;
+      }
+    >();
+
+    for (const pair of pairs) {
+      const canonicalName = pair?.canonicalName?.trim();
+      const conceptType = pair?.conceptType;
+      const surface = pair?.appliedSurface?.trim();
+      if (!canonicalName || !conceptType || !surface) continue;
+
+      const normalized = normalizeSurfaceForm(surface);
+      if (!normalized) continue;
+
+      const key = `${conceptType}::${canonicalName}::${normalized}`;
+      if (appliedMap.has(key)) continue;
+      appliedMap.set(key, {
+        canonicalName,
+        conceptType,
+        surface,
+        normalized,
+      });
+    }
+
+    return Array.from(appliedMap.values());
+  }
+
+  private async recordAppliedSurfaceUsage(
+    userId: string,
+    eventId: string,
+    appliedMentions: Array<{
+      canonicalName: string;
+      conceptType: ConceptType;
+      surface: string;
+      normalized: string;
+    }>,
+  ): Promise<void> {
+    const now = new Date().toISOString();
+    for (const mention of appliedMentions) {
+      const key = `${mention.conceptType}::${mention.canonicalName}::${mention.normalized}`;
+      const params = {
+        conceptName: mention.canonicalName,
+        conceptType: mention.conceptType,
+        surface: mention.surface,
+        normalized: mention.normalized,
+        key,
+        now,
+        userId,
+        eventId,
+      };
+      await this.upsertSurfaceFormNode(params);
+      await this.linkUserToSurfaceForm(params);
+    }
+  }
+
+  private async upsertSurfaceFormNode(params: {
+    conceptName: string;
+    conceptType: ConceptType;
+    surface: string;
+    normalized: string;
+    key: string;
+    now: string;
+    userId: string;
+    eventId: string;
+  }): Promise<void> {
+    const cypher = `
+      MATCH (c:Concept { name: $conceptName, type: $conceptType })
+      MERGE (sf:SurfaceForm { key: $key })
+      ON CREATE SET
+        sf.value = $surface,
+        sf.normalized = $normalized,
+        sf.createdAt = datetime($now),
+        sf.updatedAt = datetime($now),
+        sf.usageCount = 0,
+        sf.conceptName = $conceptName,
+        sf.conceptType = $conceptType
+      SET
+        sf.value = COALESCE($surface, sf.value),
+        sf.updatedAt = datetime($now),
+        sf.normalized = $normalized,
+        sf.usageCount = COALESCE(sf.usageCount, 0) + 1,
+        sf.lastUsedAt = datetime($now),
+        sf.lastUsedBy = $userId,
+        sf.lastUsedEventId = $eventId
+      MERGE (sf)-[r:${RELATIONS.SURFACE_OF}]->(c)
+      ON CREATE SET r.createdAt = datetime($now)
+      SET r.updatedAt = datetime($now)
+    `;
+    await this.neo4j.run(cypher, params);
+  }
+
+  private async linkUserToSurfaceForm(params: {
+    conceptName: string;
+    conceptType: ConceptType;
+    surface: string;
+    normalized: string;
+    key: string;
+    now: string;
+    userId: string;
+    eventId: string;
+  }): Promise<void> {
+    const cypher = `
+      MATCH (u:User { id: $userId })
+      MATCH (sf:SurfaceForm { key: $key })
+      MERGE (u)-[us:${RELATIONS.USED_SURFACE}]->(sf)
+      ON CREATE SET
+        us.createdAt = datetime($now),
+        us.usageCount = 0
+      SET
+        us.updatedAt = datetime($now),
+        us.usageCount = COALESCE(us.usageCount, 0) + 1,
+        us.lastUsedAt = datetime($now),
+        us.lastUsedEventId = $eventId
+    `;
+    await this.neo4j.run(cypher, params);
+  }
+
+  private async updateOntologyEventTitle(event: Event): Promise<void> {
+    const updatedAt = event.updatedAt?.toISOString() ?? new Date().toISOString();
+    const cypher = `
+      MATCH (e:Event { eventId: $eventId })
+      SET e.title = $title,
+          e.updatedAt = datetime($updatedAt)
+      RETURN e
+    `;
+    try {
+      const result = await this.neo4j.run(cypher, {
+        eventId: event.id,
+        title: event.title,
+        updatedAt,
+      });
+      if (!result.records.length) {
+        this.logger.warn(
+          `Ontology event node not found for title update: ${event.id}`,
+        );
+      }
+    } catch (error) {
+      const err = error as Error;
+      this.logger.warn(
+        `Failed to update ontology event title for ${event.id}: ${err?.message ?? err}`,
+        err?.stack,
+      );
+    }
+  }
+
+
+  private raiseIfNerFailed(ner: NERResponseDto): void {
+    if (!ner?.errors?.length) {
+      return;
+    }
+    const message = ner.errors
+      .map((error) => error?.message)
+      .filter((value): value is string => Boolean(value))
+      .join(', ');
+    throw new ServiceUnavailableException(message || 'NER failed');
   }
 
   async runNER(text: RunNERDto): Promise<NERResponseDto> {
@@ -197,22 +529,6 @@ export class SuggestionsService {
     userId: string,
   ): Promise<NERResponseDto | null> {
     return this.nerCacheService.consume(token, userId);
-  }
-
-  private mapConsistencyErrors(
-    errors?: Array<Record<string, any>>,
-  ): ConsistencyErrorDto[] | undefined {
-    if (!errors?.length) return undefined;
-    return errors.map((error) => ({
-      stage:
-        typeof error?.stage === 'string' && error.stage.trim().length
-          ? error.stage
-          : 'unknown',
-      message:
-        typeof error?.message === 'string' && error.message.trim().length
-          ? error.message
-          : JSON.stringify(error ?? {}),
-    }));
   }
 
   // ---------------------------------------------------------------------------

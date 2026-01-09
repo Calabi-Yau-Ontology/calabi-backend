@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiConflictResponse,
   ApiExtraModels,
   ApiOkResponse,
   ApiOperation,
@@ -19,6 +20,10 @@ import { SuggestionsService } from './suggestions.service';
 import { JwtAuthGuard } from '../auth/jwt/jwt.guard';
 import { AutocompleteRequestDto } from './dto/autocomplete-request.dto';
 import { ConsistencyCheckRequestDto } from './dto/consistency-request.dto';
+import {
+  ConsistencyDecisionRequestDto,
+  ConsistencyDecisionResponseDto,
+} from './dto/consistency-decision.dto';
 import type { RequestWithUser } from 'src/common/utils/request-user';
 import { getUserIdOrThrow } from 'src/common/utils/request-user';
 import { AutocompleteResponseDto } from './dto/autocomplete-response.dto';
@@ -81,7 +86,41 @@ export class SuggestionsController {
   ): Promise<ConsistencyCheckResponseDto> {
     return this.suggestionsService.runConsistencyCheck(
       getUserIdOrThrow(req),
-      dto.text,
+      dto,
     );
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('consistency-decision')
+  @ApiOperation({
+    summary: '추천 반영/무시 확정',
+    description: '추천을 반영하거나 무시했음을 서버에 기록합니다.',
+  })
+  @ApiOkResponse({ type: ConsistencyDecisionResponseDto })
+  @ApiConflictResponse({
+    description: '요청 시점과 이벤트 제목이 불일치',
+    ...buildErrorSchema({
+      statusCode: 409,
+      message: 'Event title has changed',
+      error: 'Conflict',
+    }),
+  })
+  @ApiUnauthorizedResponse({
+    description: 'JWT 미포함 또는 만료',
+    ...buildErrorSchema({
+      statusCode: 401,
+      message: ERROR_MESSAGES.AUTH.UNAUTHORIZED,
+      error: 'Unauthorized',
+    }),
+  })
+  async consistencyDecision(
+    @Request() req: RequestWithUser,
+    @Body() dto: ConsistencyDecisionRequestDto,
+  ): Promise<ConsistencyDecisionResponseDto> {
+    await this.suggestionsService.confirmConsistencyDecision(
+      getUserIdOrThrow(req),
+      dto,
+    );
+    return { acknowledged: true };
   }
 }

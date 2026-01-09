@@ -5,7 +5,7 @@ import type { Redis } from 'ioredis';
 import type { NERResponseDto } from '../dto/ner-response.dto';
 
 const CACHE_KEY_PREFIX = 'suggestions:ner:';
-const CACHE_TTL_SECONDS = 30 * 60; // 30 minutes
+const DEFAULT_CACHE_TTL_SECONDS = 30 * 60; // 30 minutes
 
 type NerCachePayload = {
   userId: string;
@@ -27,8 +27,9 @@ export class NerCacheService {
     userId: string,
     text: string,
     ner: NERResponseDto,
+    options?: { token?: string; ttlSeconds?: number },
   ): Promise<string> {
-    const token = randomUUID();
+    const token = options?.token ?? randomUUID();
     const entry: NerCachePayload = {
       userId,
       text,
@@ -36,7 +37,8 @@ export class NerCacheService {
       createdAt: Date.now(),
     };
     const key = this.buildKey(token);
-    await this.client.set(key, JSON.stringify(entry), 'EX', CACHE_TTL_SECONDS);
+    const ttlSeconds = options?.ttlSeconds ?? DEFAULT_CACHE_TTL_SECONDS;
+    await this.client.set(key, JSON.stringify(entry), 'EX', ttlSeconds);
     return token;
   }
 
@@ -55,6 +57,24 @@ export class NerCacheService {
       this.logger.warn(`Failed to delete consumed NER cache: ${message}`);
     });
     return entry.ner;
+  }
+
+  async refreshTTL(token: string, ttlSeconds?: number): Promise<void> {
+    if (!token) return;
+    const key = this.buildKey(token);
+    const seconds = ttlSeconds ?? DEFAULT_CACHE_TTL_SECONDS;
+    await this.client.expire(key, seconds).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`Failed to refresh NER cache TTL: ${message}`);
+    });
+  }
+
+  async remove(token: string): Promise<void> {
+    if (!token) return;
+    await this.client.del(this.buildKey(token)).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`Failed to remove NER cache entry: ${message}`);
+    });
   }
 
   private async load(token: string): Promise<NerCachePayload | null> {

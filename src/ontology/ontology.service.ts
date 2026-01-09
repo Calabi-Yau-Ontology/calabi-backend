@@ -181,14 +181,10 @@ export class OntologyService {
     const mentions = ner?.mentions ?? [];
     const mode = options?.mode ?? 'create';
 
-    await Promise.all([
-      this.upsertUser(user),
-      this.upsertEvent(event, { requireExisting: mode === 'update' }),
-    ]);
-    await Promise.all([
-      this.linkUserToEvent(user.id, event.id),
-      this.clearEventConceptLinks(event.id),
-    ]);
+    await this.upsertUser(user);
+    await this.upsertEvent(event, { requireExisting: mode === 'update' });
+    await this.linkUserToEvent(user.id, event.id);
+    await this.clearEventConceptLinks(event.id);
 
     const conceptMap = new Map<
       string,
@@ -220,33 +216,29 @@ export class OntologyService {
       }),
     );
 
-    await Promise.all(
-      concepts.map(async ({ canonicalName, conceptType, surface }) => {
-        const conceptProps: Record<string, any> = {
-          source: 'ml',
-        };
-        if (surface) {
-          conceptProps.provenance = surface;
-        }
+    for (const { canonicalName, conceptType, surface } of concepts) {
+      const conceptProps: Record<string, any> = {
+        source: 'ml',
+      };
+      if (surface) {
+        conceptProps.provenance = surface;
+      }
 
-        await this.upsertConceptWithProps(
-          canonicalName,
-          conceptType,
-          conceptProps,
-        );
-        await Promise.all([
-          this.linkEventToConcept(event.id, canonicalName),
-          this.linkUserToConcept(user.id, canonicalName),
-          this.recordSurfaceForm(
-            user.id,
-            event.id,
-            canonicalName,
-            conceptType,
-            surface,
-          ),
-        ]);
-      }),
-    );
+      await this.upsertConceptWithProps(
+        canonicalName,
+        conceptType,
+        conceptProps,
+      );
+      await this.linkEventToConcept(event.id, canonicalName);
+      await this.linkUserToConcept(user.id, canonicalName);
+      await this.recordSurfaceForm(
+        user.id,
+        event.id,
+        canonicalName,
+        conceptType,
+        surface,
+      );
+    }
 
     for (const { canonicalName } of concepts) {
       void this.expansionService

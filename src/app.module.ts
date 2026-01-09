@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { BullModule } from '@nestjs/bull';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import configuration from './config/configuration';
 import { validate } from './config/validation';
 import { DatabaseModule } from './database/database.module';
@@ -25,6 +26,28 @@ import { RedisModule } from './redis/redis.module';
             : '.env.test',
       load: [configuration],
       validate,
+    }),
+    BullModule.forRootAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => {
+        const redisConfig =
+          configService.get<{
+            host?: string;
+            port?: number;
+            password?: string;
+            keyPrefix?: string;
+          }>('redis') ?? {};
+
+        return {
+          prefix: redisConfig.keyPrefix ?? 'CALABI:',
+          redis: {
+            host: redisConfig.host ?? 'localhost',
+            port: redisConfig.port ?? 6379,
+            password: redisConfig.password || undefined,
+          },
+        };
+      },
     }),
     DatabaseModule,
     Neo4jModule,

@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiConflictResponse,
   ApiExtraModels,
   ApiOkResponse,
   ApiOperation,
@@ -96,6 +97,14 @@ export class SuggestionsController {
     description: '추천을 반영하거나 무시했음을 서버에 기록합니다.',
   })
   @ApiOkResponse({ type: ConsistencyDecisionResponseDto })
+  @ApiConflictResponse({
+    description: '요청 시점과 이벤트 제목이 불일치',
+    ...buildErrorSchema({
+      statusCode: 409,
+      message: 'Event title has changed',
+      error: 'Conflict',
+    }),
+  })
   @ApiUnauthorizedResponse({
     description: 'JWT 미포함 또는 만료',
     ...buildErrorSchema({

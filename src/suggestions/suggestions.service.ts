@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
@@ -15,12 +16,16 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Neo4jService } from 'src/neo4j/neo4j.service';
 import { RELATIONS } from 'src/ontology/constants/relations';
-import { isAllowedNERLabel } from 'src/ontology/constants/concept.types';
+import { ConceptType, isAllowedNERLabel } from 'src/ontology/constants/concept.types';
 import { NerCacheService } from './cache/ner-cache.service';
 import type { NERResponseDto } from './dto/ner-response.dto';
 import type { RunNERDto } from './dto/run-ner.dto';
 import { ConsistencyCheckRequestDto } from './dto/consistency-request.dto';
-import { ConsistencyDecisionRequestDto } from './dto/consistency-decision.dto';
+import {
+  ConsistencyDecisionAction,
+  ConsistencyDecisionPairDto,
+  ConsistencyDecisionRequestDto,
+} from './dto/consistency-decision.dto';
 import type {
   AutocompleteResponseDto,
   AutocompleteSuggestionDto,
@@ -53,6 +58,7 @@ import {
   normalizeEventTitle,
 } from 'src/events/utils/event-ner-cache.util';
 import { ERROR_MESSAGES } from 'src/common/constants/error-messages';
+import { normalizeSurfaceForm } from 'src/common/utils/text-normalize';
 
 const AUTOCOMPLETE_DEFAULT_LIMIT = 5;
 const AUTOCOMPLETE_MAX_LIMIT = 10;
@@ -186,10 +192,7 @@ export class SuggestionsService {
     }
     this.raiseIfNerFailed(ner);
 
-    return this.buildConsistencyResponse(
-      userId,
-      ner,
-    );
+    return this.buildConsistencyResponse(userId, ner);
   }
 
   private async waitForEventNerCache(
@@ -278,24 +281,210 @@ export class SuggestionsService {
       throw new NotFoundException(ERROR_MESSAGES.EVENT.NOT_FOUND);
     }
 
-    const normalizedTitle = normalizeEventTitle(event.title);
-    const expectedKey = normalizedTitle
-      ? buildEventNerCacheKey(event.id, normalizedTitle)
-      : null;
     const existingKey = event.nerCacheKey?.trim() ?? null;
+
+    if (dto.action === ConsistencyDecisionAction.Applied) {
+      const beforeTitle = dto.beforeTitle?.trim() ?? '';
+      const afterTitle = dto.afterTitle?.trim() ?? '';
+      const pairs = dto.pairs ?? [];
+      if (!beforeTitle) {
+        throw new BadRequestException('Before title is required');
+      }
+      if (!afterTitle) {
+        throw new BadRequestException('After title is required');
+      }
+      if (!pairs.length) {
+        throw new BadRequestException('Pairs are required');
+      }
+      if (
+        normalizeEventTitle(beforeTitle) !==
+        normalizeEventTitle(event.title)
+      ) {
+        throw new ConflictException('Event title has changed');
+      }
+
+      const appliedMentions = this.extractAppliedPairs(pairs);
+      if (appliedMentions.length) {
+        await this.recordAppliedSurfaceUsage(userId, event.id, appliedMentions);
+      }
+
+      event.title = afterTitle;
+      if (existingKey) {
+        await this.nerCacheService.remove(existingKey);
+      }
+      event.nerCacheKey = null;
+      event.nerCacheStatus = 'consumed';
+      const savedEvent = await this.eventsRepo.save(event);
+      await this.updateOntologyEventTitle(savedEvent);
+      return;
+    }
 
     if (existingKey) {
       await this.nerCacheService.remove(existingKey);
     }
-    if (expectedKey && expectedKey !== existingKey) {
-      await this.nerCacheService.remove(expectedKey);
+    event.nerCacheKey = null;
+    event.nerCacheStatus = 'consumed';
+    await this.eventsRepo.save(event);
+  }
+
+  private extractAppliedPairs(
+    pairs: ConsistencyDecisionPairDto[],
+  ): Array<{
+    canonicalName: string;
+    conceptType: ConceptType;
+    surface: string;
+    normalized: string;
+  }> {
+    const appliedMap = new Map<
+      string,
+      {
+        canonicalName: string;
+        conceptType: ConceptType;
+        surface: string;
+        normalized: string;
+      }
+    >();
+
+    for (const pair of pairs) {
+      const canonicalName = pair?.canonicalName?.trim();
+      const conceptType = pair?.conceptType;
+      const surface = pair?.appliedSurface?.trim();
+      if (!canonicalName || !conceptType || !surface) continue;
+
+      const normalized = normalizeSurfaceForm(surface);
+      if (!normalized) continue;
+
+      const key = `${conceptType}::${canonicalName}::${normalized}`;
+      if (appliedMap.has(key)) continue;
+      appliedMap.set(key, {
+        canonicalName,
+        conceptType,
+        surface,
+        normalized,
+      });
     }
 
-    await this.eventsRepo.update(event.id, {
-      nerCacheKey: null,
-      nerCacheStatus: 'consumed',
-    });
+    return Array.from(appliedMap.values());
   }
+
+  private async recordAppliedSurfaceUsage(
+    userId: string,
+    eventId: string,
+    appliedMentions: Array<{
+      canonicalName: string;
+      conceptType: ConceptType;
+      surface: string;
+      normalized: string;
+    }>,
+  ): Promise<void> {
+    const now = new Date().toISOString();
+    for (const mention of appliedMentions) {
+      const key = `${mention.conceptType}::${mention.canonicalName}::${mention.normalized}`;
+      const params = {
+        conceptName: mention.canonicalName,
+        conceptType: mention.conceptType,
+        surface: mention.surface,
+        normalized: mention.normalized,
+        key,
+        now,
+        userId,
+        eventId,
+      };
+      await this.upsertSurfaceFormNode(params);
+      await this.linkUserToSurfaceForm(params);
+    }
+  }
+
+  private async upsertSurfaceFormNode(params: {
+    conceptName: string;
+    conceptType: ConceptType;
+    surface: string;
+    normalized: string;
+    key: string;
+    now: string;
+    userId: string;
+    eventId: string;
+  }): Promise<void> {
+    const cypher = `
+      MATCH (c:Concept { name: $conceptName, type: $conceptType })
+      MERGE (sf:SurfaceForm { key: $key })
+      ON CREATE SET
+        sf.value = $surface,
+        sf.normalized = $normalized,
+        sf.createdAt = datetime($now),
+        sf.updatedAt = datetime($now),
+        sf.usageCount = 0,
+        sf.conceptName = $conceptName,
+        sf.conceptType = $conceptType
+      SET
+        sf.value = COALESCE($surface, sf.value),
+        sf.updatedAt = datetime($now),
+        sf.normalized = $normalized,
+        sf.usageCount = COALESCE(sf.usageCount, 0) + 1,
+        sf.lastUsedAt = datetime($now),
+        sf.lastUsedBy = $userId,
+        sf.lastUsedEventId = $eventId
+      MERGE (sf)-[r:${RELATIONS.SURFACE_OF}]->(c)
+      ON CREATE SET r.createdAt = datetime($now)
+      SET r.updatedAt = datetime($now)
+    `;
+    await this.neo4j.run(cypher, params);
+  }
+
+  private async linkUserToSurfaceForm(params: {
+    conceptName: string;
+    conceptType: ConceptType;
+    surface: string;
+    normalized: string;
+    key: string;
+    now: string;
+    userId: string;
+    eventId: string;
+  }): Promise<void> {
+    const cypher = `
+      MATCH (u:User { id: $userId })
+      MATCH (sf:SurfaceForm { key: $key })
+      MERGE (u)-[us:${RELATIONS.USED_SURFACE}]->(sf)
+      ON CREATE SET
+        us.createdAt = datetime($now),
+        us.usageCount = 0
+      SET
+        us.updatedAt = datetime($now),
+        us.usageCount = COALESCE(us.usageCount, 0) + 1,
+        us.lastUsedAt = datetime($now),
+        us.lastUsedEventId = $eventId
+    `;
+    await this.neo4j.run(cypher, params);
+  }
+
+  private async updateOntologyEventTitle(event: Event): Promise<void> {
+    const updatedAt = event.updatedAt?.toISOString() ?? new Date().toISOString();
+    const cypher = `
+      MATCH (e:Event { eventId: $eventId })
+      SET e.title = $title,
+          e.updatedAt = datetime($updatedAt)
+      RETURN e
+    `;
+    try {
+      const result = await this.neo4j.run(cypher, {
+        eventId: event.id,
+        title: event.title,
+        updatedAt,
+      });
+      if (!result.records.length) {
+        this.logger.warn(
+          `Ontology event node not found for title update: ${event.id}`,
+        );
+      }
+    } catch (error) {
+      const err = error as Error;
+      this.logger.warn(
+        `Failed to update ontology event title for ${event.id}: ${err?.message ?? err}`,
+        err?.stack,
+      );
+    }
+  }
+
 
   private raiseIfNerFailed(ner: NERResponseDto): void {
     if (!ner?.errors?.length) {

@@ -9,6 +9,7 @@ import { Event } from './entities/event.entity';
 import { Category } from '../categories/entities/category.entity';
 import { UsersModule } from 'src/users/users.module';
 import { OntologyModule } from 'src/ontology/ontology.module';
+import { SuggestionsModule } from 'src/suggestions/suggestions.module';
 import { ONTOLOGY_QUEUE_NAME } from 'src/ontology/types/ontology-queue-job';
 
 @Module({
@@ -16,6 +17,7 @@ import { ONTOLOGY_QUEUE_NAME } from 'src/ontology/types/ontology-queue-job';
     TypeOrmModule.forFeature([Event, Category]),
     UsersModule,
     OntologyModule,
+    SuggestionsModule,
     BullModule.registerQueue({ name: ONTOLOGY_QUEUE_NAME }),
     ClientsModule.register([
       {

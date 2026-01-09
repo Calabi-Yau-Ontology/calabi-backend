@@ -78,29 +78,7 @@ export class ConsistencyRecommendationDto {
   mostFrequent?: SurfaceRecommendationDto | null;
 }
 
-export class ConsistencyErrorDto {
-  @ApiProperty({ example: 'ner' })
-  stage!: string;
-
-  @ApiProperty({ example: 'NER service unavailable' })
-  message!: string;
-}
-
 export class ConsistencyCheckResponseDto {
-  @ApiProperty({
-    description: 'NER 캐시 토큰',
-    example: 'cache_123',
-  })
-  cacheToken!: string;
-
   @ApiProperty({ type: ConsistencyRecommendationDto, isArray: true })
   results!: ConsistencyRecommendationDto[];
-
-  @ApiProperty({
-    description: '에러 목록',
-    type: ConsistencyErrorDto,
-    isArray: true,
-    required: false,
-  })
-  errors?: ConsistencyErrorDto[];
 }

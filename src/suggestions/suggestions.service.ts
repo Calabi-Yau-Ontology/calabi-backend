@@ -1,16 +1,26 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { AxiosError, isAxiosError } from 'axios';
 import neo4j from 'neo4j-driver';
 import type { Node, Record as Neo4jRecord, Relationship } from 'neo4j-driver';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { Neo4jService } from 'src/neo4j/neo4j.service';
 import { RELATIONS } from 'src/ontology/constants/relations';
 import { isAllowedNERLabel } from 'src/ontology/constants/concept.types';
 import { NerCacheService } from './cache/ner-cache.service';
 import type { NERResponseDto } from './dto/ner-response.dto';
 import type { RunNERDto } from './dto/run-ner.dto';
+import { ConsistencyCheckRequestDto } from './dto/consistency-request.dto';
+import { ConsistencyDecisionRequestDto } from './dto/consistency-decision.dto';
 import type {
   AutocompleteResponseDto,
   AutocompleteSuggestionDto,
@@ -20,7 +30,6 @@ import type {
   ConsistencyRecommendationDto,
   SurfaceRecommendationDto,
   RecommendationReason,
-  ConsistencyErrorDto,
 } from './dto/consistency-response.dto';
 import {
   extractConcept,
@@ -35,6 +44,15 @@ import type {
   ConsistencyRecommendationRow,
   SurfaceRecommendationRowEntry,
 } from './types/graph.types';
+import { Event } from 'src/events/entities/event.entity';
+import {
+  EVENT_NER_CACHE_POLL_INTERVAL_MS,
+  EVENT_NER_CACHE_TIMEOUT_MS,
+  EVENT_NER_CACHE_TTL_SECONDS,
+  buildEventNerCacheKey,
+  normalizeEventTitle,
+} from 'src/events/utils/event-ner-cache.util';
+import { ERROR_MESSAGES } from 'src/common/constants/error-messages';
 
 const AUTOCOMPLETE_DEFAULT_LIMIT = 5;
 const AUTOCOMPLETE_MAX_LIMIT = 10;
@@ -49,6 +67,8 @@ export class SuggestionsService {
     private readonly configService: ConfigService,
     private readonly neo4j: Neo4jService,
     private readonly nerCacheService: NerCacheService,
+    @InjectRepository(Event)
+    private readonly eventsRepo: Repository<Event>,
   ) {
     const mlConfig = this.configService.get<{ baseUrl: string }>('ml');
     this.baseUrl = mlConfig?.baseUrl ?? '';
@@ -111,58 +131,181 @@ export class SuggestionsService {
   }
 
   /**
-   * NER 기반 일관성 검사: NER 결과 캐싱 후, 기존 SurfaceForm 통계를 조회해 추천.
+   * NER 기반 일관성 검사: 이벤트 캐시 또는 즉석 텍스트 기반으로 추천을 반환한다.
    */
   async runConsistencyCheck(
+    userId: string,
+    dto: ConsistencyCheckRequestDto,
+  ): Promise<ConsistencyCheckResponseDto> {
+    if (dto.eventId) {
+      return this.runEventConsistencyCheck(userId, dto.eventId);
+    }
+    const text = dto.text?.trim() ?? '';
+    return this.runAdhocConsistencyCheck(userId, text);
+  }
+
+  private async runAdhocConsistencyCheck(
     userId: string,
     text: string,
   ): Promise<ConsistencyCheckResponseDto> {
     const cleanedText = text?.trim() ?? '';
     const ner = await this.runNER({ text: cleanedText });
-    const nerErrors = this.mapConsistencyErrors(ner.errors);
-    const cacheToken = await this.nerCacheService.store(
+    this.raiseIfNerFailed(ner);
+    await this.nerCacheService.store(
       userId,
       cleanedText,
       ner,
     );
+    return this.buildConsistencyResponse(userId, ner);
+  }
 
+  private async runEventConsistencyCheck(
+    userId: string,
+    eventId: string,
+  ): Promise<ConsistencyCheckResponseDto> {
+    const event = await this.eventsRepo.findOne({
+      where: { id: eventId, user: { id: userId } },
+    });
+    if (!event) {
+      throw new NotFoundException(ERROR_MESSAGES.EVENT.NOT_FOUND);
+    }
+
+    const normalizedTitle = normalizeEventTitle(event.title);
+    if (!normalizedTitle) {
+      throw new BadRequestException('Event title is empty');
+    }
+
+    const cacheKey = await this.ensureEventCacheKey(event, normalizedTitle);
+
+    const ner = await this.waitForEventNerCache(cacheKey, userId);
+    if (!ner) {
+      this.logger.warn(
+        `Consistency check timeout for event ${eventId} (user: ${userId})`,
+      );
+      throw new ServiceUnavailableException('NER processing timeout');
+    }
+    this.raiseIfNerFailed(ner);
+
+    return this.buildConsistencyResponse(
+      userId,
+      ner,
+    );
+  }
+
+  private async waitForEventNerCache(
+    cacheKey: string,
+    userId: string,
+  ): Promise<NERResponseDto | null> {
+    const deadline = Date.now() + EVENT_NER_CACHE_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      const cached = await this.nerCacheService.resolve(cacheKey, userId);
+      if (cached) {
+        await this.nerCacheService.refreshTTL(
+          cacheKey,
+          EVENT_NER_CACHE_TTL_SECONDS,
+        );
+        return cached;
+      }
+      await this.delay(EVENT_NER_CACHE_POLL_INTERVAL_MS);
+    }
+    return null;
+  }
+
+  private async ensureEventCacheKey(
+    event: Event,
+    normalizedTitle: string,
+  ): Promise<string> {
+    const expectedKey = buildEventNerCacheKey(event.id, normalizedTitle);
+    const existingKey = event.nerCacheKey?.trim() ?? null;
+
+    if (existingKey && existingKey !== expectedKey) {
+      await this.nerCacheService.remove(existingKey);
+    }
+
+    if (!existingKey || existingKey !== expectedKey) {
+      await this.eventsRepo.update(event.id, {
+        nerCacheKey: expectedKey,
+        nerCacheStatus: 'pending',
+      });
+      event.nerCacheKey = expectedKey;
+    }
+
+    return expectedKey;
+  }
+
+  private async buildConsistencyResponse(
+    userId: string,
+    ner: NERResponseDto,
+  ): Promise<ConsistencyCheckResponseDto> {
     const canonicalMentions = this.extractCanonicalMentions(ner);
+
     if (!canonicalMentions.length) {
       return {
-        cacheToken,
         results: [],
-        errors: nerErrors,
       };
     }
 
-    let rows: ConsistencyRecommendationRow[] = [];
     try {
-      rows = await this.fetchConsistencyRows(userId, canonicalMentions);
+      const rows = await this.fetchConsistencyRows(userId, canonicalMentions);
+      const results: ConsistencyRecommendationDto[] = rows
+        .map((row) => this.mapConsistencyRow(row))
+        .filter((row): row is ConsistencyRecommendationDto => row !== null);
+      return {
+        results,
+      };
     } catch (error: unknown) {
       const message = this.extractErrorMessage(error);
       this.logger.error(
         `Consistency query failed for user ${userId}: ${message}`,
         this.extractErrorStack(error),
       );
-      const errors: ConsistencyErrorDto[] = [
-        ...(nerErrors ?? []),
-        { stage: 'neo4j', message },
-      ];
-      return {
-        cacheToken,
-        results: [],
-        errors,
-      };
+      throw new ServiceUnavailableException(message);
     }
-    const results: ConsistencyRecommendationDto[] = rows
-      .map((row) => this.mapConsistencyRow(row))
-      .filter((row): row is ConsistencyRecommendationDto => row !== null);
+  }
 
-    return {
-      cacheToken,
-      results,
-      errors: nerErrors,
-    };
+  private async delay(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async confirmConsistencyDecision(
+    userId: string,
+    dto: ConsistencyDecisionRequestDto,
+  ): Promise<void> {
+    const event = await this.eventsRepo.findOne({
+      where: { id: dto.eventId, user: { id: userId } },
+    });
+    if (!event) {
+      throw new NotFoundException(ERROR_MESSAGES.EVENT.NOT_FOUND);
+    }
+
+    const normalizedTitle = normalizeEventTitle(event.title);
+    const expectedKey = normalizedTitle
+      ? buildEventNerCacheKey(event.id, normalizedTitle)
+      : null;
+    const existingKey = event.nerCacheKey?.trim() ?? null;
+
+    if (existingKey) {
+      await this.nerCacheService.remove(existingKey);
+    }
+    if (expectedKey && expectedKey !== existingKey) {
+      await this.nerCacheService.remove(expectedKey);
+    }
+
+    await this.eventsRepo.update(event.id, {
+      nerCacheKey: null,
+      nerCacheStatus: 'consumed',
+    });
+  }
+
+  private raiseIfNerFailed(ner: NERResponseDto): void {
+    if (!ner?.errors?.length) {
+      return;
+    }
+    const message = ner.errors
+      .map((error) => error?.message)
+      .filter((value): value is string => Boolean(value))
+      .join(', ');
+    throw new ServiceUnavailableException(message || 'NER failed');
   }
 
   async runNER(text: RunNERDto): Promise<NERResponseDto> {
@@ -197,22 +340,6 @@ export class SuggestionsService {
     userId: string,
   ): Promise<NERResponseDto | null> {
     return this.nerCacheService.consume(token, userId);
-  }
-
-  private mapConsistencyErrors(
-    errors?: Array<Record<string, any>>,
-  ): ConsistencyErrorDto[] | undefined {
-    if (!errors?.length) return undefined;
-    return errors.map((error) => ({
-      stage:
-        typeof error?.stage === 'string' && error.stage.trim().length
-          ? error.stage
-          : 'unknown',
-      message:
-        typeof error?.message === 'string' && error.message.trim().length
-          ? error.message
-          : JSON.stringify(error ?? {}),
-    }));
   }
 
   // ---------------------------------------------------------------------------

@@ -95,7 +95,7 @@ export class ExpansionService {
   private async setConceptQid(name: string, qid: string): Promise<void> {
     const cypher = `
       MATCH (c:Concept { name: $name })
-      SET c.qid = $qid,
+      SET c.wikidataQid = $qid,
           c.source = "wikidata",
           c.updatedAt = datetime()
     `;
@@ -125,7 +125,7 @@ export class ExpansionService {
 
   /**
    * 중심 Concept와 Concept 이웃들을 연결한다.
-   * - Concept(name) ↔ Concept(qid) identity 연결
+   * - Concept(name) ↔ Concept(wikidataQid) identity 연결
    * - 각 neighbor를 Concept으로 upsert + label 저장
    * - Concept와 neighbor를 INSTANCE_OF / SUBCLASS_OF ... 관계로 직접 연결
    */
@@ -139,8 +139,10 @@ export class ExpansionService {
     const cypher = `
       UNWIND $edges AS e
       MATCH (c:Concept { name: $conceptName })
-      MERGE (n:Concept { name: e.neighborLabel, qid: e.neighborQid })
-      ON CREATE SET n.createdAt = datetime()
+      MERGE (n:Concept { wikidataQid: e.neighborQid })
+      ON CREATE SET
+        n.name = e.neighborLabel,
+        n.createdAt = datetime()
       SET n.updatedAt = datetime()
 
       FOREACH (_ IN CASE WHEN e.rel = 'INSTANCE_OF' THEN [1] ELSE [] END |

@@ -1,90 +1,38 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Calabi Backend
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Main API Server for a Calabi project that turns user events into structured knowledge. It manages users, categories, and events, then enriches event text through an ML NER service to drive consistency suggestions and a Neo4j-based ontology graph. The system also uses Redis caching and emits event stream messages for downstream processing.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## Project Structure
 
 ```
 calabi-backend/
 ├── src
-│   ├── main.ts
 │   ├── app.module.ts
-│   ├── config
-│   │   ├── configuration.ts
-│   │   └── validation.ts
-│   ├── common
-│   │   ├── filters
-│   │   │   └── http-exception.filter.ts
-│   │   └── interceptors
-│   │       └── transform.interceptor.ts
-│   ├── database
-│   │   ├── database.module.ts
-│   │   └── ormconfig.ts
-│   ├── neo4j
-│   │   ├── neo4j.module.ts
-│   │   └── neo4j.service.ts
-│   ├── users
-│   │   ├── users.module.ts
-│   │   ├── users.controller.ts
-│   │   ├── users.service.ts
-│   │   ├── dto
-│   │   │   ├── create-user.dto.ts
-│   │   │   └── update-user.dto.ts
-│   │   └── entities
-│   │       └── user.entity.ts
+│   ├── main.ts
 │   ├── auth
-│   │   ├── auth.module.ts
-│   │   ├── auth.controller.ts
-│   │   ├── auth.service.ts
-│   │   ├── dto
-│   │   │   ├── login.dto.ts
-│   │   │   └── register.dto.ts
-│   │   └── strategies
-│   │       ├── jwt.strategy.ts
-│   │       └── local.strategy.ts
+│   ├── categories
+│   ├── common
+│   ├── config
+│   ├── database
 │   ├── events
-│   │   ├── events.module.ts
-│   │   ├── events.controller.ts
-│   │   ├── events.service.ts
-│   │   ├── dto
-│   │   │   ├── create-event.dto.ts
-│   │   │   └── update-event.dto.ts
-│   │   └── entities
-│   │       └── event.entity.ts
+│   ├── health
+│   ├── neo4j
+│   ├── ontology
+│   ├── redis
 │   ├── suggestions
-│   │   ├── suggestions.module.ts
-│   │   ├── suggestions.controller.ts
-│   │   ├── suggestions.service.ts
-│   │   └── dto
-│   │       └── suggest.dto.ts
-│   └── ontology
-│       ├── ontology.module.ts
-│       ├── ontology.service.ts
-│       └── dto
-│           └── create-node.dto.ts
+│   ├── users
+│   └── wikidata
+├── test
+│   ├── app.e2e-spec.ts
+│   └── jest-e2e.json
 ├── package.json
-├── tsconfig.json
-├── .env
-└── README.md
+└── tsconfig.json
 ```
 
-## License
+## Key Responsibilities
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+- User authentication and profile handling
+- Category and event CRUD for calendar data
+- NER-powered consistency suggestions with Redis cache
+- Ontology graph modeling in Neo4j with Wikidata expansion
+- Event stream publishing for real-time consumers

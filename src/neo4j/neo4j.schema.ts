@@ -19,8 +19,10 @@ export const NEO4J_SCHEMA_STATEMENTS: string[] = [
    FOR (u:User) REQUIRE u.id IS UNIQUE`,
 
   // 확장 상태 조회 최적화
-  `CREATE INDEX concept_wikidata_qid_idx IF NOT EXISTS
-   FOR (c:Concept) ON (c.wikidataQid)`,
+  `DROP INDEX concept_wikidata_qid_idx IF EXISTS`,
+
+  `CREATE CONSTRAINT concept_wikidata_qid_unique IF NOT EXISTS
+   FOR (c:Concept) REQUIRE c.wikidataQid IS UNIQUE`,
 
   `CREATE INDEX concept_expanded_at_idx IF NOT EXISTS
    FOR (c:Concept) ON (c.wikidataExpandedAt)`

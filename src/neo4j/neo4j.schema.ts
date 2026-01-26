@@ -1,4 +1,11 @@
 export const NEO4J_SCHEMA_STATEMENTS: string[] = [
+  // ---- Meta ontology (taxonomy MVP) ----
+  `CREATE CONSTRAINT oclass_id_unique IF NOT EXISTS
+   FOR (c:OClass) REQUIRE c.id IS UNIQUE`,
+
+  `CREATE INDEX oclass_facet_idx IF NOT EXISTS
+   FOR (c:OClass) ON (c.facet)`,
+
   // Concept: canonical name+type unique
   `CREATE CONSTRAINT concept_name_type_unique IF NOT EXISTS
    FOR (c:Concept) REQUIRE (c.name, c.type) IS UNIQUE`,

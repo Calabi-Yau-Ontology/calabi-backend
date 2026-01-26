@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import neo4j, { Driver } from 'neo4j-driver';
 import { Neo4jService } from './neo4j.service';
 import { NEO4J_SCHEMA_STATEMENTS } from './neo4j.schema';
+import { NEO4J_SEED_STATEMENTS } from './neo4j.seed';
 
 @Global()
 @Module({
@@ -39,5 +40,18 @@ export class Neo4jModule implements OnModuleInit {
       }
     }
     this.logger.log('Neo4j schema ensured.');
+
+    for (const stmt of NEO4J_SEED_STATEMENTS) {
+      try {
+        await this.neo4j.run(stmt, {});
+      } catch (e: any) {
+        this.logger.error(
+          `Neo4j seed apply failed: ${e?.message ?? e}`,
+          e?.stack,
+        );
+        throw e;
+      }
+    }
+    this.logger.log('Neo4j seed ensured.');
   }
 }

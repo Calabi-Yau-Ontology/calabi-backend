@@ -1,4 +1,6 @@
 export default () => ({
+  // IMPORTANT: Any hard-coded defaults here should be safe for production.
+  // Avoid enabling network-heavy optional features by default.
   port: parseInt(process.env.PORT ?? '4000', 10),
   database: {
     host: process.env.POSTGRES_HOST ?? 'localhost',
@@ -32,6 +34,11 @@ export default () => ({
     keyPrefix: process.env.REDIS_KEY_PREFIX ?? 'CALABI:',
   },
   wikidata: {
+    // Feature flag: keep Wikidata expansion code, but disable by default.
+    // Set WIKIDATA_EXPANSION_ENABLED=true to re-enable.
+    expansionEnabled:
+      String(process.env.WIKIDATA_EXPANSION_ENABLED ?? 'false').toLowerCase() ===
+      'true',
     sparqlEndpoint: process.env.WIKIDATA_SPARQL_ENDPOINT,
     searchEndpoint: process.env.WIKIDATA_SEARCH_ENDPOINT,
     language: process.env.WIKIDATA_LANGUAGE || 'ko,en',

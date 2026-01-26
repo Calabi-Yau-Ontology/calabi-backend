@@ -34,5 +34,12 @@ calabi-backend/
 - User authentication and profile handling
 - Category and event CRUD for calendar data
 - NER-powered consistency suggestions with Redis cache
-- Ontology graph modeling in Neo4j with Wikidata expansion
+- Ontology graph modeling in Neo4j (includes taxonomy meta-classes `:OClass` seeded on startup)
+- Optional Wikidata expansion (feature-flagged)
 - Event stream publishing for real-time consumers
+
+## Feature Flags
+
+- `WIKIDATA_EXPANSION_ENABLED=true|false` (default: `false`)
+  - When enabled, `OntologyService` can trigger `ExpansionService` to enrich concepts via Wikidata.
+  - When disabled, ingestion runs without any Wikidata network calls while keeping the code intact for future re-enable.

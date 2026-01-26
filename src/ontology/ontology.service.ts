@@ -1,4 +1,5 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Neo4jService } from 'src/neo4j/neo4j.service';
 import { Event } from 'src/events/entities/event.entity';
 import { User } from 'src/users/entities/user.entity';
@@ -19,6 +20,7 @@ export class OntologyService {
 
   constructor(
     private readonly neo4j: Neo4jService,
+    private readonly config: ConfigService,
     private readonly expansionService: ExpansionService,
   ) {}
 
@@ -241,16 +243,19 @@ export class OntologyService {
     }
 
     for (const { canonicalName } of concepts) {
-      void this.expansionService
-        .expandConceptByName(canonicalName)
-        .catch((error: unknown) => {
-          const message =
-            error instanceof Error ? error.message : String(error);
-          this.logger.warn(
-            `Wikidata expansion skipped for "${canonicalName}": ${message}`,
-          );
-        });
+      if (!this.isWikidataExpansionEnabled()) break;
+
+      void this.expansionService.expandConceptByName(canonicalName).catch(() => {
+        // Intentionally swallow errors:
+        // - Expansion is optional and should never break the ingestion pipeline.
+        // - Details are handled inside ExpansionService logs/markers.
+      });
     }
+  }
+
+  private isWikidataExpansionEnabled(): boolean {
+    const enabled = this.config.get<boolean>('wikidata.expansionEnabled');
+    return enabled === true;
   }
 
   private async recordSurfaceForm(

@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Neo4jService } from 'src/neo4j/neo4j.service';
 import { WikidataService } from 'src/wikidata/wikidata.service';
 import { WikidataNeighbor } from 'src/wikidata/wikidata.types';
@@ -16,12 +17,15 @@ export class ExpansionService {
 
   constructor(
     private readonly neo4j: Neo4jService,
+    private readonly config: ConfigService,
     private readonly wikidata: WikidataService,
   ) {}
 
   async expandConceptByName(
     canonicalName: string,
   ): Promise<{ expanded: boolean; reason: string }> {
+    if (!this.isEnabled()) return { expanded: false, reason: 'disabled' };
+
     const name = canonicalName.trim();
     if (!name) return { expanded: false, reason: 'empty_name' };
 
@@ -65,6 +69,11 @@ export class ExpansionService {
   }
 
   // ---------------- internal helpers ----------------
+
+  private isEnabled(): boolean {
+    const enabled = this.config.get<boolean>('wikidata.expansionEnabled');
+    return enabled === true;
+  }
 
   private async getConceptRowByName(name: string): Promise<ConceptRow | null> {
     const cypher = `

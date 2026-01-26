@@ -49,8 +49,10 @@ class EnvironmentVariables {
   @IsString()
   GOOGLE_REDIRECT_URI!: string;
 
+  @IsOptional()
   @IsString()
   WIKIDATA_SPARQL_ENDPOINT?: string;
+  @IsOptional()
   @IsString()
   WIKIDATA_SEARCH_ENDPOINT?: string;
   @IsOptional()
@@ -59,6 +61,10 @@ class EnvironmentVariables {
   @IsOptional()
   @IsString()
   WIKIDATA_MAX_NEIGHBORS?: string;
+
+  @IsOptional()
+  @IsString()
+  WIKIDATA_EXPANSION_ENABLED?: string;
 }
 
 export function validate(config: Record<string, unknown>) {

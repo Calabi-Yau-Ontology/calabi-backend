@@ -149,3 +149,100 @@ MERGE (child)-[:OSUBCLASS_OF]->(parent)
 RETURN count(*) AS ensuredSubclassEdgesCount
   `,
 ];
+
+/**
+ * Optional seeds (intentionally NOT executed on startup).
+ *
+ * Why disabled for v0.1:
+ * - Title-based mentions + current NER setup make Location/Food/Media roll-ups less deterministic than Activity roll-ups.
+ * - Enabling these too early tends to create noisy/unstable classification that is costly to maintain.
+ *
+ * Enable later by appending selected statements to `NEO4J_SEED_STATEMENTS`
+ * (and restarting the backend), once you have stable classification rules.
+ */
+export const NEO4J_OPTIONAL_SEED_STATEMENTS = {
+  placeContext: [
+    `
+WITH [
+  { id: 'PlaceContext', labelKo: '장소 컨텍스트', labelEn: 'Place Context', facet: 'Location', isRoot: true, kind: 'Category', description: '장소를 의미 단위로 묶는 컨텍스트 분류(초기에는 비활성 권장)' },
+  { id: 'Home', labelKo: '집', labelEn: 'Home', facet: 'Location', isRoot: false, kind: 'Category', description: '거주지/집' },
+  { id: 'Office', labelKo: '회사/사무실', labelEn: 'Office', facet: 'Location', isRoot: false, kind: 'Category', description: '업무 공간' },
+  { id: 'Gym', labelKo: '운동 시설', labelEn: 'Gym', facet: 'Location', isRoot: false, kind: 'Category', description: '헬스장/암장/체육 시설' },
+  { id: 'RestaurantPlace', labelKo: '식당', labelEn: 'Restaurant', facet: 'Location', isRoot: false, kind: 'Category', description: '식당/레스토랑' },
+  { id: 'CafePlace', labelKo: '카페', labelEn: 'Cafe', facet: 'Location', isRoot: false, kind: 'Category', description: '카페/디저트/베이커리' },
+  { id: 'TransitHub', labelKo: '교통 거점', labelEn: 'Transit Hub', facet: 'Location', isRoot: false, kind: 'Category', description: '역/공항/터미널' },
+  { id: 'OutdoorPlace', labelKo: '야외', labelEn: 'Outdoor', facet: 'Location', isRoot: false, kind: 'Category', description: '공원/산/바다 등 야외' },
+  { id: 'Accommodation', labelKo: '숙소', labelEn: 'Accommodation', facet: 'Location', isRoot: false, kind: 'Category', description: '호텔/숙소' }
+] AS classes
+UNWIND classes AS cls
+MERGE (c:OClass {id: cls.id})
+ON CREATE SET
+  c.labelKo = cls.labelKo,
+  c.labelEn = cls.labelEn,
+  c.facet = cls.facet,
+  c.kind = cls.kind,
+  c.isRoot = cls.isRoot,
+  c.description = cls.description,
+  c.status = 'inactive',
+  c.seedVersion = '0.1.1-opt',
+  c.createdAt = datetime()
+RETURN count(c) AS ensuredOClassCount
+    `,
+    `
+WITH [
+  { child: 'Home', parent: 'PlaceContext' },
+  { child: 'Office', parent: 'PlaceContext' },
+  { child: 'Gym', parent: 'PlaceContext' },
+  { child: 'RestaurantPlace', parent: 'PlaceContext' },
+  { child: 'CafePlace', parent: 'PlaceContext' },
+  { child: 'TransitHub', parent: 'PlaceContext' },
+  { child: 'OutdoorPlace', parent: 'PlaceContext' },
+  { child: 'Accommodation', parent: 'PlaceContext' }
+] AS edges
+UNWIND edges AS e
+MATCH (child:OClass {id: e.child})
+MATCH (parent:OClass {id: e.parent})
+MERGE (child)-[:OSUBCLASS_OF]->(parent)
+RETURN count(*) AS ensuredSubclassEdgesCount
+    `,
+  ],
+  foodMedia: [
+    `
+WITH [
+  { id: 'FoodEntity', labelKo: '음식(엔티티)', labelEn: 'Food (Entity)', facet: 'Food', isRoot: true, kind: 'Category', description: '음식/가게/요리 관련 엔티티 분류(초기에는 비활성 권장)' },
+  { id: 'Cuisine', labelKo: '음식 종류', labelEn: 'Cuisine', facet: 'Food', isRoot: false, kind: 'Category', description: '한식/일식 등 요리 카테고리(추후 확장)' },
+  { id: 'Drink', labelKo: '음료/주류', labelEn: 'Drink', facet: 'Food', isRoot: false, kind: 'Category', description: '커피/맥주 등' },
+
+  { id: 'MediaEntity', labelKo: '미디어(엔티티)', labelEn: 'Media (Entity)', facet: 'Media', isRoot: true, kind: 'Category', description: '영화/TV/책 등 미디어 엔티티 분류(초기에는 비활성 권장)' },
+  { id: 'Movie', labelKo: '영화', labelEn: 'Movie', facet: 'Media', isRoot: false, kind: 'Category', description: '영화' },
+  { id: 'TVShow', labelKo: 'TV쇼', labelEn: 'TV Show', facet: 'Media', isRoot: false, kind: 'Category', description: 'TV 프로그램/시리즈' }
+] AS classes
+UNWIND classes AS cls
+MERGE (c:OClass {id: cls.id})
+ON CREATE SET
+  c.labelKo = cls.labelKo,
+  c.labelEn = cls.labelEn,
+  c.facet = cls.facet,
+  c.kind = cls.kind,
+  c.isRoot = cls.isRoot,
+  c.description = cls.description,
+  c.status = 'inactive',
+  c.seedVersion = '0.1.1-opt',
+  c.createdAt = datetime()
+RETURN count(c) AS ensuredOClassCount
+    `,
+    `
+WITH [
+  { child: 'Cuisine', parent: 'FoodEntity' },
+  { child: 'Drink', parent: 'FoodEntity' },
+  { child: 'Movie', parent: 'MediaEntity' },
+  { child: 'TVShow', parent: 'MediaEntity' }
+] AS edges
+UNWIND edges AS e
+MATCH (child:OClass {id: e.child})
+MATCH (parent:OClass {id: e.parent})
+MERGE (child)-[:OSUBCLASS_OF]->(parent)
+RETURN count(*) AS ensuredSubclassEdgesCount
+    `,
+  ],
+} as const;

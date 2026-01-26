@@ -122,22 +122,30 @@ export class OntologyService {
     });
   }
 
-  async linkEventToConcept(eventId: string, conceptName: string) {
+  async linkEventToConcept(
+    eventId: string,
+    conceptName: string,
+    conceptType: ConceptType,
+  ) {
     const cypher = `
       MATCH (e:Event { eventId: $eventId })
-      MATCH (c:Concept { name: $conceptName })
+      MATCH (c:Concept { name: $conceptName, type: $conceptType })
       MERGE (e)-[:${RELATIONS.MENTIONS}]->(c)
     `;
-    await this.neo4j.run(cypher, { eventId, conceptName });
+    await this.neo4j.run(cypher, { eventId, conceptName, conceptType });
   }
 
-  async linkUserToConcept(userId: string, conceptName: string) {
+  async linkUserToConcept(
+    userId: string,
+    conceptName: string,
+    conceptType: ConceptType,
+  ) {
     const cypher = `
       MATCH (u:User { id: $userId })
-      MATCH (c:Concept { name: $conceptName })
+      MATCH (c:Concept { name: $conceptName, type: $conceptType })
       MERGE (u)-[:${RELATIONS.RELATED_TO}]->(c)
     `;
-    await this.neo4j.run(cypher, { userId, conceptName });
+    await this.neo4j.run(cypher, { userId, conceptName, conceptType });
   }
 
   async linkUserToEvent(userId: string, eventId: string) {
@@ -229,8 +237,8 @@ export class OntologyService {
         conceptType,
         conceptProps,
       );
-      await this.linkEventToConcept(event.id, canonicalName);
-      await this.linkUserToConcept(user.id, canonicalName);
+      await this.linkEventToConcept(event.id, canonicalName, conceptType);
+      await this.linkUserToConcept(user.id, canonicalName, conceptType);
       await this.recordSurfaceForm(
         user.id,
         event.id,
@@ -240,9 +248,9 @@ export class OntologyService {
       );
     }
 
-    for (const { canonicalName } of concepts) {
+    for (const { canonicalName, conceptType } of concepts) {
       void this.expansionService
-        .expandConceptByName(canonicalName)
+        .expandConceptByName(canonicalName, conceptType)
         .catch((error: unknown) => {
           const message =
             error instanceof Error ? error.message : String(error);

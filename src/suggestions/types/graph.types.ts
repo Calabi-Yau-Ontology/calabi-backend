@@ -37,6 +37,7 @@ export type ConsistencyRecommendationRow = {
 
 export type CanonicalMention = {
   canonicalName: string;
+  conceptType: ConceptType;
   surface?: string | null;
   span?: { start: number; end: number } | null;
 };

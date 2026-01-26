@@ -16,7 +16,11 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Neo4jService } from 'src/neo4j/neo4j.service';
 import { RELATIONS } from 'src/ontology/constants/relations';
-import { ConceptType, isAllowedNERLabel } from 'src/ontology/constants/concept.types';
+import {
+  ConceptType,
+  NER_TO_CONCEPT_TYPE,
+  isAllowedNERLabel,
+} from 'src/ontology/constants/concept.types';
 import { NerCacheService } from './cache/ner-cache.service';
 import type { NERResponseDto } from './dto/ner-response.dto';
 import type { RunNERDto } from './dto/run-ner.dto';
@@ -542,12 +546,17 @@ export class SuggestionsService {
     for (const mention of mentions) {
       const label = mention?.ner?.label;
       if (!isAllowedNERLabel(label)) continue;
+      const conceptType = NER_TO_CONCEPT_TYPE[label];
 
       const canonicalName = mention?.canonical?.en?.trim();
-      if (!canonicalName || map.has(canonicalName)) continue;
+      if (!canonicalName) continue;
 
-      map.set(canonicalName, {
+      const key = `${conceptType}::${canonicalName}`;
+      if (map.has(key)) continue;
+
+      map.set(key, {
         canonicalName,
+        conceptType,
         surface: mention?.surface?.trim() ?? null,
         span: mention?.span ?? null,
       });
@@ -567,7 +576,7 @@ export class SuggestionsService {
     const cypher = `
       MATCH (u:User { id: $userId })
       UNWIND $items AS item
-      MATCH (c:Concept { name: item.canonicalName })
+      MATCH (c:Concept { name: item.canonicalName, type: item.conceptType })
       CALL {
         WITH c, u
         MATCH (u)-[freqRel:${usageRel}]->(freq:SurfaceForm)-[:${surfaceRel}]->(c)

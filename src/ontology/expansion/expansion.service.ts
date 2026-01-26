@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Neo4jService } from 'src/neo4j/neo4j.service';
 import { WikidataService } from 'src/wikidata/wikidata.service';
 import { WikidataNeighbor } from 'src/wikidata/wikidata.types';
+import { ConceptType } from '../constants/concept.types';
 
 type ConceptRow = {
   name: string;
@@ -21,12 +22,13 @@ export class ExpansionService {
 
   async expandConceptByName(
     canonicalName: string,
+    conceptType: ConceptType,
   ): Promise<{ expanded: boolean; reason: string }> {
     const name = canonicalName.trim();
     if (!name) return { expanded: false, reason: 'empty_name' };
 
     // 1) Concept load
-    const concept = await this.getConceptRowByName(name);
+    const concept = await this.getConceptRowByName(name, conceptType);
     if (!concept) return { expanded: false, reason: 'concept_not_found' };
 
     // 2) guard: expandedAt 있으면 재확장 금지
@@ -39,10 +41,10 @@ export class ExpansionService {
     if (!qid) {
       qid = await this.resolveQidByCanonicalName(name);
       if (!qid) {
-        await this.markWikidataError(name, 'search_failed');
+        await this.markWikidataError(name, conceptType, 'search_failed');
         return { expanded: false, reason: 'qid_not_found' };
       }
-      await this.setConceptQid(name, qid);
+      await this.setConceptQid(name, conceptType, qid);
     }
 
     // 4) neighbors
@@ -51,24 +53,27 @@ export class ExpansionService {
     // console.log(`Fetched ${edges.length} neighbors for QID ${qid}`);
     if (!edges.length) {
       // neighbors 없더라도 지금은 “확장 완료”로 마킹
-      await this.markExpanded(name);
+      await this.markExpanded(name, conceptType);
       return { expanded: true, reason: 'expanded_no_neighbors' };
     }
 
     // 5) upsert neighbors + relations (idempotent)
-    await this.upsertNeighborhood(name, edges);
+    await this.upsertNeighborhood(name, conceptType, edges);
 
     // 6) expandedAt mark (마지막에)
-    await this.markExpanded(name);
+    await this.markExpanded(name, conceptType);
 
     return { expanded: true, reason: 'expanded' };
   }
 
   // ---------------- internal helpers ----------------
 
-  private async getConceptRowByName(name: string): Promise<ConceptRow | null> {
+  private async getConceptRowByName(
+    name: string,
+    conceptType: ConceptType,
+  ): Promise<ConceptRow | null> {
     const cypher = `
-      MATCH (c:Concept { name: $name })
+      MATCH (c:Concept { name: $name, type: $conceptType })
       RETURN {
         name: c.name,
         type: c.type,
@@ -77,7 +82,7 @@ export class ExpansionService {
       } AS c
       LIMIT 1
     `;
-    const res = await this.neo4j.run(cypher, { name });
+    const res = await this.neo4j.run(cypher, { name, conceptType });
     return res.records.length ? (res.records[0].get('c') as ConceptRow) : null;
   }
 
@@ -92,35 +97,43 @@ export class ExpansionService {
     return (exact?.id ?? results[0].id).trim();
   }
 
-  private async setConceptQid(name: string, qid: string): Promise<void> {
+  private async setConceptQid(
+    name: string,
+    conceptType: ConceptType,
+    qid: string,
+  ): Promise<void> {
     const cypher = `
-      MATCH (c:Concept { name: $name })
+      MATCH (c:Concept { name: $name, type: $conceptType })
       SET c.wikidataQid = $qid,
           c.source = "wikidata",
           c.updatedAt = datetime()
     `;
-    await this.neo4j.run(cypher, { name, qid });
+    await this.neo4j.run(cypher, { name, conceptType, qid });
   }
 
-  private async markExpanded(name: string): Promise<void> {
+  private async markExpanded(
+    name: string,
+    conceptType: ConceptType,
+  ): Promise<void> {
     const cypher = `
-      MATCH (c:Concept { name: $name })
+      MATCH (c:Concept { name: $name, type: $conceptType })
       SET c.wikidataExpandedAt = datetime(),
           c.updatedAt = datetime()
     `;
-    await this.neo4j.run(cypher, { name });
+    await this.neo4j.run(cypher, { name, conceptType });
   }
 
   private async markWikidataError(
     name: string,
+    conceptType: ConceptType,
     lastError: string,
   ): Promise<void> {
     const cypher = `
-      MATCH (c:Concept { name: $name })
+      MATCH (c:Concept { name: $name, type: $conceptType })
       SET c.wikidataLastError = $lastError,
           c.updatedAt = datetime()
     `;
-    await this.neo4j.run(cypher, { name, lastError });
+    await this.neo4j.run(cypher, { name, conceptType, lastError });
   }
 
   /**
@@ -131,6 +144,7 @@ export class ExpansionService {
    */
   private async upsertNeighborhood(
     conceptName: string,
+    conceptType: ConceptType,
     edges: WikidataNeighbor[],
   ): Promise<void> {
     if (!edges.length) return;
@@ -138,7 +152,7 @@ export class ExpansionService {
     // 각 neighbor를 Concept Node로 upsert하고 Concept에 rel 타입으로 연결
     const cypher = `
       UNWIND $edges AS e
-      MATCH (c:Concept { name: $conceptName })
+      MATCH (c:Concept { name: $conceptName, type: $conceptType })
       MERGE (n:Concept { wikidataQid: e.neighborQid })
       ON CREATE SET
         n.name = e.neighborLabel,
@@ -169,6 +183,7 @@ export class ExpansionService {
 
     await this.neo4j.run(cypher, {
       conceptName,
+      conceptType,
       edges: edges.map((edge) => ({
         neighborQid: edge.neighborQid,
         neighborLabel: edge.neighborLabel,

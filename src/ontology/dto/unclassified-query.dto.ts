@@ -1,6 +1,14 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import {
+  IsDateString,
+  IsIn,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+} from 'class-validator';
 import { CONCEPT_TYPE_LABELS } from '../constants/concept.types';
 import type { ConceptType } from '../constants/concept.types';
 
@@ -19,7 +27,7 @@ export class UnclassifiedQueryDto {
     example: '2025-01-01T00:00:00Z',
   })
   @IsOptional()
-  @IsString()
+  @IsDateString()
   since?: string;
 
   @ApiPropertyOptional({ description: '최소 멘션 횟수', example: 3 })

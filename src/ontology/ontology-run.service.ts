@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { OntologyRun } from './entities/ontology-run.entity';
@@ -53,10 +53,19 @@ export class OntologyRunService {
     dto: ConfirmOntologyRunDto,
   ): Promise<OntologyRun> {
     const run = await this.getRun(id);
+    if (!this.isConfirmable(run.status)) {
+      throw new ConflictException(
+        `Run ${id} cannot be confirmed from status: ${run.status}`,
+      );
+    }
     run.confirmJson = dto.confirm ?? run.confirmJson ?? null;
     run.diffJson = dto.diff ?? run.diffJson ?? null;
     run.notes = dto.notes ?? run.notes ?? null;
     run.status = 'confirmed' as OntologyRunStatus;
     return this.runRepo.save(run);
+  }
+
+  private isConfirmable(status: OntologyRunStatus): boolean {
+    return status === 'proposed' || status === 'confirmed';
   }
 }

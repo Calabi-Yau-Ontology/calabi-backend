@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Neo4jService } from 'src/neo4j/neo4j.service';
 import { Event } from 'src/events/entities/event.entity';
@@ -13,15 +13,15 @@ import {
 } from './constants/concept.types';
 import { RELATIONS } from './constants/relations';
 import { ExpansionService } from './expansion/expansion.service';
+import { OntologyAutoClassifyService } from './ontology-auto-classify.service';
 
 @Injectable()
 export class OntologyService {
-  private readonly logger = new Logger(OntologyService.name);
-
   constructor(
     private readonly neo4j: Neo4jService,
     private readonly config: ConfigService,
     private readonly expansionService: ExpansionService,
+    private readonly autoClassifyService: OntologyAutoClassifyService,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -202,6 +202,7 @@ export class OntologyService {
         canonicalName: string;
         conceptType: ConceptType;
         surface: string | null;
+        span?: { start: number; end: number } | null;
         taxonomy?: {
           oClassId: string;
           confidence?: number;
@@ -228,6 +229,7 @@ export class OntologyService {
             reason: m.taxonomy.reason ?? null,
           }
         : undefined;
+      const span = m?.span ?? null;
 
       const existing = conceptMap.get(conceptKey);
       if (!existing) {
@@ -235,6 +237,7 @@ export class OntologyService {
           canonicalName,
           conceptType: mappedType,
           surface: m?.surface?.trim() ?? null,
+          span,
           taxonomy,
         });
         continue;
@@ -242,6 +245,9 @@ export class OntologyService {
 
       if (!existing.surface && m?.surface) {
         existing.surface = m.surface.trim();
+      }
+      if (!existing.span && span) {
+        existing.span = span;
       }
 
       if (taxonomy?.oClassId) {
@@ -257,6 +263,7 @@ export class OntologyService {
       canonicalName: value.canonicalName,
       conceptType: value.conceptType,
       surface: value.surface,
+      span: value.span ?? null,
       taxonomy: value.taxonomy,
     }));
 
@@ -282,21 +289,18 @@ export class OntologyService {
         conceptType,
         surface,
       );
-      if (this.isAutoClassifyEnabled()) {
-        const threshold = this.getAutoClassifyMinConfidence();
-        const confidence = taxonomy?.confidence ?? 0;
-        if (taxonomy?.oClassId && confidence >= threshold) {
-          await this.classifyConceptByOClass({
-            conceptName: canonicalName,
-            conceptType,
-            oClassId: taxonomy.oClassId,
-            confidence,
-            source: taxonomy.source ?? 'llm',
-            reason: taxonomy.reason ?? null,
-          });
-        }
-      }
+      await this.autoClassifyService.classifyFromTaxonomy({
+        conceptName: canonicalName,
+        conceptType,
+        taxonomy,
+      });
     }
+
+    await this.autoClassifyService.autoClassifyUnclassifiedConcepts({
+      concepts,
+      sourceText: event.title,
+      normalizedTextEn: ner?.normalized_text_en ?? null,
+    });
 
     for (const { canonicalName } of concepts) {
       if (!this.isWikidataExpansionEnabled()) break;
@@ -312,16 +316,6 @@ export class OntologyService {
   private isWikidataExpansionEnabled(): boolean {
     const enabled = this.config.get<boolean>('wikidata.expansionEnabled');
     return enabled === true;
-  }
-
-  private isAutoClassifyEnabled(): boolean {
-    const enabled = this.config.get<boolean>('ontology.autoClassify.enabled');
-    return enabled !== false;
-  }
-
-  private getAutoClassifyMinConfidence(): number {
-    const value = this.config.get<number>('ontology.autoClassify.minConfidence');
-    return typeof value === 'number' && !Number.isNaN(value) ? value : 0.85;
   }
 
   private async recordSurfaceForm(
@@ -398,56 +392,6 @@ export class OntologyService {
         us.lastUsedEventId = $eventId
     `;
     await this.neo4j.run(cypher, params);
-  }
-
-  private async classifyConceptByOClass(params: {
-    conceptName: string;
-    conceptType: ConceptType;
-    oClassId: string;
-    confidence: number;
-    source: string;
-    reason: string | null;
-  }): Promise<void> {
-    const cypher = `
-      MATCH (c:Concept { name: $conceptName, type: $conceptType })
-      MATCH (o:OClass { id: $oClassId })
-      OPTIONAL MATCH (c)-[r:CLASSIFIED_AS]->(:OClass)
-      WHERE coalesce(r.active, true) = true
-      WITH c, o, collect(r) AS activeRels
-      WITH c, o, activeRels,
-           [r IN activeRels WHERE coalesce(r.source, '') IN ['llm', 'auto']
-             AND coalesce(toFloat(r.confidence), -1) < $confidence] AS replaceable,
-           [r IN activeRels WHERE NOT (coalesce(r.source, '') IN ['llm', 'auto']
-             AND coalesce(toFloat(r.confidence), -1) < $confidence)] AS blocked
-      WITH c, o, activeRels, replaceable, blocked,
-           CASE
-             WHEN size(activeRels) = 0 THEN true
-             WHEN size(blocked) = 0 AND size(replaceable) > 0 THEN true
-             ELSE false
-           END AS allowReplace
-      FOREACH (_ IN CASE WHEN allowReplace AND size(replaceable) > 0 THEN [1] ELSE [] END |
-        FOREACH (old IN replaceable |
-          SET old.active = false, old.updatedAt = datetime()
-        )
-      )
-      FOREACH (_ IN CASE WHEN allowReplace THEN [1] ELSE [] END |
-        MERGE (c)-[rel:CLASSIFIED_AS]->(o)
-        ON CREATE SET rel.createdAt = datetime()
-        SET rel.updatedAt = datetime(),
-            rel.active = true,
-            rel.source = $source,
-            rel.confidence = $confidence,
-            rel.reason = $reason,
-            rel.decidedAt = datetime()
-      )
-    `;
-    try {
-      await this.neo4j.run(cypher, params);
-    } catch (err) {
-      this.logger.warn(
-        `Auto-classify failed for ${params.conceptType}::${params.conceptName} -> ${params.oClassId}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
   }
 
   // ---------------------------------------------------------------------------

@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { HttpModule } from '@nestjs/axios';
 import { BullModule } from '@nestjs/bull';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { OntologyService } from './ontology.service';
@@ -14,9 +15,11 @@ import { OntologyRun } from './entities/ontology-run.entity';
 import { OntologyRunService } from './ontology-run.service';
 import { OntologyAdminService } from './ontology-admin.service';
 import { OntologyController } from './ontology.controller';
+import { OntologyAutoClassifyService } from './ontology-auto-classify.service';
 
 @Module({
   imports: [
+    HttpModule,
     Neo4jModule,
     WikidataModule,
     UsersModule,
@@ -30,6 +33,7 @@ import { OntologyController } from './ontology.controller';
     OntologyProcessor,
     OntologyRunService,
     OntologyAdminService,
+    OntologyAutoClassifyService,
   ],
   controllers: [OntologyController],
   exports: [OntologyService, ExpansionService],

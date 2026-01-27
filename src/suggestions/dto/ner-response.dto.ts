@@ -11,6 +11,12 @@ export class NERResponseDto {
     span: { start: number; end: number };
     ner: { label: NERLabel; confidence?: number };
     canonical: { en?: string; reason?: string | null };
+    taxonomy?: {
+      oClassId?: string;
+      confidence?: number;
+      source?: string;
+      reason?: string | null;
+    };
   }>;
 
   errors?: Array<Record<string, any>>;

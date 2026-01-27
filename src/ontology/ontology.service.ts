@@ -124,22 +124,30 @@ export class OntologyService {
     });
   }
 
-  async linkEventToConcept(eventId: string, conceptName: string) {
+  async linkEventToConcept(
+    eventId: string,
+    conceptName: string,
+    conceptType: ConceptType,
+  ) {
     const cypher = `
       MATCH (e:Event { eventId: $eventId })
-      MATCH (c:Concept { name: $conceptName })
+      MATCH (c:Concept { name: $conceptName, type: $conceptType })
       MERGE (e)-[:${RELATIONS.MENTIONS}]->(c)
     `;
-    await this.neo4j.run(cypher, { eventId, conceptName });
+    await this.neo4j.run(cypher, { eventId, conceptName, conceptType });
   }
 
-  async linkUserToConcept(userId: string, conceptName: string) {
+  async linkUserToConcept(
+    userId: string,
+    conceptName: string,
+    conceptType: ConceptType,
+  ) {
     const cypher = `
       MATCH (u:User { id: $userId })
-      MATCH (c:Concept { name: $conceptName })
+      MATCH (c:Concept { name: $conceptName, type: $conceptType })
       MERGE (u)-[:${RELATIONS.RELATED_TO}]->(c)
     `;
-    await this.neo4j.run(cypher, { userId, conceptName });
+    await this.neo4j.run(cypher, { userId, conceptName, conceptType });
   }
 
   async linkUserToEvent(userId: string, eventId: string) {
@@ -191,8 +199,15 @@ export class OntologyService {
     const conceptMap = new Map<
       string,
       {
+        canonicalName: string;
         conceptType: ConceptType;
         surface: string | null;
+        taxonomy?: {
+          oClassId: string;
+          confidence?: number;
+          source?: string;
+          reason?: string | null;
+        };
       }
     >();
 
@@ -202,23 +217,50 @@ export class OntologyService {
       const mappedType = NER_TO_CONCEPT_TYPE[label];
 
       const canonicalName = m?.canonical?.en?.trim();
-      if (!canonicalName || conceptMap.has(canonicalName)) continue;
+      if (!canonicalName) continue;
+      const conceptKey = `${mappedType}::${canonicalName}`;
 
-      conceptMap.set(canonicalName, {
-        conceptType: mappedType,
-        surface: m?.surface?.trim() ?? null,
-      });
+      const taxonomy = m?.taxonomy?.oClassId
+        ? {
+            oClassId: m.taxonomy.oClassId,
+            confidence: m.taxonomy.confidence,
+            source: m.taxonomy.source,
+            reason: m.taxonomy.reason ?? null,
+          }
+        : undefined;
+
+      const existing = conceptMap.get(conceptKey);
+      if (!existing) {
+        conceptMap.set(conceptKey, {
+          canonicalName,
+          conceptType: mappedType,
+          surface: m?.surface?.trim() ?? null,
+          taxonomy,
+        });
+        continue;
+      }
+
+      if (!existing.surface && m?.surface) {
+        existing.surface = m.surface.trim();
+      }
+
+      if (taxonomy?.oClassId) {
+        const existingConfidence = existing.taxonomy?.confidence ?? -1;
+        const nextConfidence = taxonomy.confidence ?? -1;
+        if (!existing.taxonomy?.oClassId || nextConfidence > existingConfidence) {
+          existing.taxonomy = taxonomy;
+        }
+      }
     }
 
-    const concepts = Array.from(conceptMap.entries()).map(
-      ([canonicalName, value]) => ({
-        canonicalName,
-        conceptType: value.conceptType,
-        surface: value.surface,
-      }),
-    );
+    const concepts = Array.from(conceptMap.values()).map((value) => ({
+      canonicalName: value.canonicalName,
+      conceptType: value.conceptType,
+      surface: value.surface,
+      taxonomy: value.taxonomy,
+    }));
 
-    for (const { canonicalName, conceptType, surface } of concepts) {
+    for (const { canonicalName, conceptType, surface, taxonomy } of concepts) {
       const conceptProps: Record<string, any> = {
         source: 'ml',
       };
@@ -231,8 +273,8 @@ export class OntologyService {
         conceptType,
         conceptProps,
       );
-      await this.linkEventToConcept(event.id, canonicalName);
-      await this.linkUserToConcept(user.id, canonicalName);
+      await this.linkEventToConcept(event.id, canonicalName, conceptType);
+      await this.linkUserToConcept(user.id, canonicalName, conceptType);
       await this.recordSurfaceForm(
         user.id,
         event.id,
@@ -240,6 +282,20 @@ export class OntologyService {
         conceptType,
         surface,
       );
+      if (this.isAutoClassifyEnabled()) {
+        const threshold = this.getAutoClassifyMinConfidence();
+        const confidence = taxonomy?.confidence ?? 0;
+        if (taxonomy?.oClassId && confidence >= threshold) {
+          await this.classifyConceptByOClass({
+            conceptName: canonicalName,
+            conceptType,
+            oClassId: taxonomy.oClassId,
+            confidence,
+            source: taxonomy.source ?? 'llm',
+            reason: taxonomy.reason ?? null,
+          });
+        }
+      }
     }
 
     for (const { canonicalName } of concepts) {
@@ -256,6 +312,16 @@ export class OntologyService {
   private isWikidataExpansionEnabled(): boolean {
     const enabled = this.config.get<boolean>('wikidata.expansionEnabled');
     return enabled === true;
+  }
+
+  private isAutoClassifyEnabled(): boolean {
+    const enabled = this.config.get<boolean>('ontology.autoClassify.enabled');
+    return enabled !== false;
+  }
+
+  private getAutoClassifyMinConfidence(): number {
+    const value = this.config.get<number>('ontology.autoClassify.minConfidence');
+    return typeof value === 'number' && !Number.isNaN(value) ? value : 0.85;
   }
 
   private async recordSurfaceForm(
@@ -332,6 +398,56 @@ export class OntologyService {
         us.lastUsedEventId = $eventId
     `;
     await this.neo4j.run(cypher, params);
+  }
+
+  private async classifyConceptByOClass(params: {
+    conceptName: string;
+    conceptType: ConceptType;
+    oClassId: string;
+    confidence: number;
+    source: string;
+    reason: string | null;
+  }): Promise<void> {
+    const cypher = `
+      MATCH (c:Concept { name: $conceptName, type: $conceptType })
+      MATCH (o:OClass { id: $oClassId })
+      OPTIONAL MATCH (c)-[r:CLASSIFIED_AS]->(:OClass)
+      WHERE coalesce(r.active, true) = true
+      WITH c, o, collect(r) AS activeRels
+      WITH c, o, activeRels,
+           [r IN activeRels WHERE coalesce(r.source, '') IN ['llm', 'auto']
+             AND coalesce(toFloat(r.confidence), -1) < $confidence] AS replaceable,
+           [r IN activeRels WHERE NOT (coalesce(r.source, '') IN ['llm', 'auto']
+             AND coalesce(toFloat(r.confidence), -1) < $confidence)] AS blocked
+      WITH c, o, activeRels, replaceable, blocked,
+           CASE
+             WHEN size(activeRels) = 0 THEN true
+             WHEN size(blocked) = 0 AND size(replaceable) > 0 THEN true
+             ELSE false
+           END AS allowReplace
+      FOREACH (_ IN CASE WHEN allowReplace AND size(replaceable) > 0 THEN [1] ELSE [] END |
+        FOREACH (old IN replaceable |
+          SET old.active = false, old.updatedAt = datetime()
+        )
+      )
+      FOREACH (_ IN CASE WHEN allowReplace THEN [1] ELSE [] END |
+        MERGE (c)-[rel:CLASSIFIED_AS]->(o)
+        ON CREATE SET rel.createdAt = datetime()
+        SET rel.updatedAt = datetime(),
+            rel.active = true,
+            rel.source = $source,
+            rel.confidence = $confidence,
+            rel.reason = $reason,
+            rel.decidedAt = datetime()
+      )
+    `;
+    try {
+      await this.neo4j.run(cypher, params);
+    } catch (err) {
+      this.logger.warn(
+        `Auto-classify failed for ${params.conceptType}::${params.conceptName} -> ${params.oClassId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   // ---------------------------------------------------------------------------

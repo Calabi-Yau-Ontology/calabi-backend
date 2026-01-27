@@ -51,6 +51,13 @@ class EnvironmentVariables {
 
   @IsOptional()
   @IsString()
+  ONTOLOGY_AUTO_CLASSIFY_ENABLED?: string;
+  @IsOptional()
+  @IsString()
+  ONTOLOGY_AUTO_CLASSIFY_MIN_CONFIDENCE?: string;
+
+  @IsOptional()
+  @IsString()
   WIKIDATA_SPARQL_ENDPOINT?: string;
   @IsOptional()
   @IsString()

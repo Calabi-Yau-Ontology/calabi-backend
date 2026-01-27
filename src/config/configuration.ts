@@ -33,6 +33,17 @@ export default () => ({
     password: process.env.REDIS_PASSWORD ?? undefined,
     keyPrefix: process.env.REDIS_KEY_PREFIX ?? 'CALABI:',
   },
+  ontology: {
+    autoClassify: {
+      enabled:
+        String(
+          process.env.ONTOLOGY_AUTO_CLASSIFY_ENABLED ?? 'true',
+        ).toLowerCase() === 'true',
+      minConfidence: Number(
+        process.env.ONTOLOGY_AUTO_CLASSIFY_MIN_CONFIDENCE ?? '0.85',
+      ),
+    },
+  },
   wikidata: {
     // Feature flag: keep Wikidata expansion code, but disable by default.
     // Set WIKIDATA_EXPANSION_ENABLED=true to re-enable.

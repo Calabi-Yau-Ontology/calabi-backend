@@ -10,6 +10,10 @@ import { SuggestionsModule } from 'src/suggestions/suggestions.module';
 import { Event } from 'src/events/entities/event.entity';
 import { OntologyProcessor } from './ontology.processor';
 import { ONTOLOGY_QUEUE_NAME } from './types/ontology-queue-job';
+import { OntologyRun } from './entities/ontology-run.entity';
+import { OntologyRunService } from './ontology-run.service';
+import { OntologyAdminService } from './ontology-admin.service';
+import { OntologyController } from './ontology.controller';
 
 @Module({
   imports: [
@@ -17,10 +21,17 @@ import { ONTOLOGY_QUEUE_NAME } from './types/ontology-queue-job';
     WikidataModule,
     UsersModule,
     SuggestionsModule,
-    TypeOrmModule.forFeature([Event]),
+    TypeOrmModule.forFeature([Event, OntologyRun]),
     BullModule.registerQueue({ name: ONTOLOGY_QUEUE_NAME }),
   ],
-  providers: [OntologyService, ExpansionService, OntologyProcessor],
+  providers: [
+    OntologyService,
+    ExpansionService,
+    OntologyProcessor,
+    OntologyRunService,
+    OntologyAdminService,
+  ],
+  controllers: [OntologyController],
   exports: [OntologyService, ExpansionService],
 })
 export class OntologyModule {}

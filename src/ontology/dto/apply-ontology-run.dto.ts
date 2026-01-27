@@ -4,7 +4,6 @@ import {
   IsBoolean,
   IsDateString,
   IsIn,
-  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -136,12 +135,4 @@ export class ApplyOntologyRunDto {
   @Type(() => Boolean)
   @IsBoolean()
   replaceActive?: boolean;
-
-  @ApiPropertyOptional({ description: '배치 크기 (대량 apply 최적화용)' })
-  @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  @Max(5000)
-  batchSize?: number;
 }

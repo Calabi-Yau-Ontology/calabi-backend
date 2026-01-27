@@ -23,6 +23,7 @@ import { CreateOntologyRunDto } from './dto/create-ontology-run.dto';
 import { ConfirmOntologyRunDto } from './dto/confirm-ontology-run.dto';
 import { ListOntologyRunsDto } from './dto/list-ontology-runs.dto';
 import { UnclassifiedQueryDto } from './dto/unclassified-query.dto';
+import { ApplyOntologyRunDto } from './dto/apply-ontology-run.dto';
 import { HttpErrorResponseDto } from 'src/common/dto/http-error-response.dto';
 
 @ApiTags('온톨로지')
@@ -84,5 +85,15 @@ export class OntologyController {
     @Body() dto: ConfirmOntologyRunDto,
   ): Promise<OntologyRun> {
     return this.runService.confirmRun(id, dto);
+  }
+
+  @Post('runs/:id/apply')
+  @ApiOperation({ summary: 'Ontology run apply 실행' })
+  @ApiOkResponse({ type: OntologyRun })
+  async applyRun(
+    @Param('id') id: string,
+    @Body() dto: ApplyOntologyRunDto,
+  ): Promise<OntologyRun> {
+    return this.runService.applyRun(id, dto);
   }
 }

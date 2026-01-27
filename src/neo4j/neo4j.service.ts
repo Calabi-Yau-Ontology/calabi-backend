@@ -1,5 +1,5 @@
 import { Inject, Injectable, OnModuleDestroy } from '@nestjs/common';
-import { Driver, QueryResult } from 'neo4j-driver';
+import { Driver, QueryResult, Session } from 'neo4j-driver';
 
 @Injectable()
 export class Neo4jService implements OnModuleDestroy {
@@ -16,6 +16,15 @@ export class Neo4jService implements OnModuleDestroy {
     const session = this.driver.session();
     try {
       return await session.run(query, params);
+    } finally {
+      await session.close();
+    }
+  }
+
+  async withSession<T>(fn: (session: Session) => Promise<T>): Promise<T> {
+    const session = this.driver.session();
+    try {
+      return await fn(session);
     } finally {
       await session.close();
     }

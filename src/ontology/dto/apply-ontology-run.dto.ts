@@ -48,11 +48,6 @@ export class OClassUpsertDto {
   @IsString()
   description?: string;
 
-  @ApiPropertyOptional({ description: '상태' })
-  @IsOptional()
-  @IsString()
-  status?: string;
-
   @ApiPropertyOptional({ description: 'seedVersion' })
   @IsOptional()
   @IsString()
@@ -108,6 +103,41 @@ export class ClassificationUpsertDto {
   active?: boolean;
 }
 
+export class EventClassificationUpsertDto {
+  @ApiProperty({ description: 'Event id', example: 'event-uuid' })
+  @IsString()
+  eventId!: string;
+
+  @ApiProperty({ description: 'OClass id', example: 'PhysicalActivity' })
+  @IsString()
+  oClassId!: string;
+
+  @ApiPropertyOptional({ description: 'source', enum: ['llm', 'human'] })
+  @IsOptional()
+  @IsString()
+  @IsIn(['llm', 'human'])
+  source?: 'llm' | 'human';
+
+  @ApiPropertyOptional({ description: 'confidence (0~1)' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(1)
+  confidence?: number;
+
+  @ApiPropertyOptional({ description: '결정 시각 (RFC3339)' })
+  @IsOptional()
+  @IsDateString()
+  decidedAt?: string;
+
+  @ApiPropertyOptional({ description: 'active 여부' })
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  active?: boolean;
+}
+
 export class ApplyOntologyRunDto {
   @ApiPropertyOptional({ type: [OClassUpsertDto] })
   @IsOptional()
@@ -126,6 +156,12 @@ export class ApplyOntologyRunDto {
   @ValidateNested({ each: true })
   @Type(() => ClassificationUpsertDto)
   classificationsUpsert?: ClassificationUpsertDto[];
+
+  @ApiPropertyOptional({ type: [EventClassificationUpsertDto] })
+  @IsOptional()
+  @ValidateNested({ each: true })
+  @Type(() => EventClassificationUpsertDto)
+  eventClassificationsUpsert?: EventClassificationUpsertDto[];
 
   @ApiPropertyOptional({
     description:

@@ -11,7 +11,6 @@ type OClassRow = {
   kind?: string | null;
   isRoot?: boolean | null;
   description?: string | null;
-  status?: string | null;
   seedVersion?: string | null;
 };
 
@@ -35,7 +34,6 @@ export class OntologyAdminService {
         kind: c.kind,
         isRoot: c.isRoot,
         description: c.description,
-        status: c.status,
         seedVersion: c.seedVersion
       } AS c
       ORDER BY c.facet, c.isRoot DESC, c.id
@@ -85,7 +83,10 @@ export class OntologyAdminService {
         MATCH (c)-[r:CLASSIFIED_AS]->(:OClass)
         WHERE coalesce(r.active, true) = true
       }
-      AND ($conceptType IS NULL OR c.type = $conceptType)
+      AND (
+        ($conceptType IS NOT NULL AND c.type = $conceptType)
+        OR ($conceptType IS NULL AND c.type <> 'Activity')
+      )
 
       OPTIONAL MATCH (e:Event)-[:MENTIONS]->(c)
       WHERE $since IS NULL OR e.startTime >= datetime($since)

@@ -269,6 +269,8 @@ export class OntologyService {
     }
 
     await this.autoClassifyService.autoClassifyUnclassifiedConcepts({
+      eventId: event.id,
+      eventTitle: event.title,
       concepts,
       sourceText: event.title,
       normalizedTextEn: ner?.normalized_text_en ?? null,

@@ -14,6 +14,7 @@ import { OntologyRunStatus } from './constants/ontology-run.constants';
 import {
   ApplyOntologyRunDto,
   ClassificationUpsertDto,
+  EventClassificationUpsertDto,
   OClassUpsertDto,
   SubclassEdgeUpsertDto,
 } from './dto/apply-ontology-run.dto';
@@ -116,6 +117,7 @@ export class OntologyRunService {
     const oClasses = dto.oClassesUpsert ?? [];
     const subclassEdges = dto.subclassEdgesUpsert ?? [];
     const classifications = dto.classificationsUpsert ?? [];
+    const eventClassifications = dto.eventClassificationsUpsert ?? [];
     const replaceActive = dto.replaceActive !== false;
 
     return this.neo4j.withSession(async (session) => {
@@ -126,6 +128,9 @@ export class OntologyRunService {
         let classificationApplied = 0;
         let classificationSkippedMissingConcept = 0;
         let classificationSkippedMissingOClass = 0;
+        let eventClassificationApplied = 0;
+        let eventClassificationSkippedMissingEvent = 0;
+        let eventClassificationSkippedMissingOClass = 0;
 
         if (oClasses.length) {
           const res = await tx.run(this.buildOClassUpsertCypher(), {
@@ -159,6 +164,24 @@ export class OntologyRunService {
           }
         }
 
+        if (eventClassifications.length) {
+          const res = await tx.run(this.buildEventClassificationCypher(), {
+            rows: eventClassifications,
+            runId,
+            replaceActive,
+          });
+          const row = res.records?.[0]?.get('r');
+          if (row) {
+            eventClassificationApplied = Number(row.applied ?? 0);
+            eventClassificationSkippedMissingEvent = Number(
+              row.missingEvent ?? 0,
+            );
+            eventClassificationSkippedMissingOClass = Number(
+              row.missingOClass ?? 0,
+            );
+          }
+        }
+
         await tx.commit();
         return {
           oClassUpserted,
@@ -166,6 +189,9 @@ export class OntologyRunService {
           classificationApplied,
           classificationSkippedMissingConcept,
           classificationSkippedMissingOClass,
+          eventClassificationApplied,
+          eventClassificationSkippedMissingEvent,
+          eventClassificationSkippedMissingOClass,
           replaceActive,
         };
       } catch (e) {
@@ -180,8 +206,7 @@ export class OntologyRunService {
       UNWIND $rows AS row
       MERGE (c:OClass { id: row.id })
       ON CREATE SET
-        c.createdAt = datetime(),
-        c.status = coalesce(row.status, 'active')
+        c.createdAt = datetime()
       SET
         c.labelKo = coalesce(row.labelKo, c.labelKo),
         c.labelEn = coalesce(row.labelEn, c.labelEn),
@@ -212,7 +237,12 @@ export class OntologyRunService {
       UNWIND $rows AS row
       OPTIONAL MATCH (c:Concept { name: row.conceptName, type: row.conceptType })
       OPTIONAL MATCH (o:OClass { id: row.oClassId })
-      WITH row, c, o,
+      WITH row, c,
+           CASE
+             WHEN o IS NULL THEN NULL
+             WHEN o.facet = 'Activity' THEN NULL
+             ELSE o
+           END AS o,
            CASE WHEN c IS NULL THEN 1 ELSE 0 END AS missC,
            CASE WHEN o IS NULL THEN 1 ELSE 0 END AS missO,
            CASE WHEN c IS NOT NULL AND o IS NOT NULL THEN 1 ELSE 0 END AS applied
@@ -237,6 +267,46 @@ export class OntologyRunService {
       RETURN {
         applied: sum(applied),
         missingConcept: sum(missC),
+        missingOClass: sum(missO)
+      } AS r
+    `;
+  }
+
+  private buildEventClassificationCypher() {
+    return `
+      UNWIND $rows AS row
+      OPTIONAL MATCH (e:Event { eventId: row.eventId })
+      OPTIONAL MATCH (o:OClass { id: row.oClassId })
+      WITH row, e,
+           CASE
+             WHEN o IS NULL THEN NULL
+             WHEN o.facet <> 'Activity' THEN NULL
+             ELSE o
+           END AS o,
+           CASE WHEN e IS NULL THEN 1 ELSE 0 END AS missE,
+           CASE WHEN o IS NULL THEN 1 ELSE 0 END AS missO,
+           CASE WHEN e IS NOT NULL AND o IS NOT NULL THEN 1 ELSE 0 END AS applied
+      FOREACH (_ IN CASE WHEN $replaceActive AND e IS NOT NULL AND o IS NOT NULL THEN [1] ELSE [] END |
+        MATCH (e)-[old:HAS_ACTIVITY]->(:OClass)
+        WHERE coalesce(old.active, true) = true
+        SET old.active = false, old.updatedAt = datetime()
+      )
+      FOREACH (_ IN CASE WHEN e IS NOT NULL AND o IS NOT NULL THEN [1] ELSE [] END |
+        MERGE (e)-[r:HAS_ACTIVITY]->(o)
+        ON CREATE SET r.createdAt = datetime()
+        SET r.updatedAt = datetime(),
+            r.active = coalesce(row.active, true),
+            r.runId = $runId,
+            r.source = coalesce(row.source, 'llm'),
+            r.confidence = row.confidence,
+            r.decidedAt = CASE
+              WHEN row.decidedAt IS NULL THEN datetime()
+              ELSE datetime(row.decidedAt)
+            END
+      )
+      RETURN {
+        applied: sum(applied),
+        missingEvent: sum(missE),
         missingOClass: sum(missO)
       } AS r
     `;

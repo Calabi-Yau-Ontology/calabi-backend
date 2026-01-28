@@ -75,9 +75,51 @@ ON CREATE SET
   c.kind = cls.kind,
   c.isRoot = cls.isRoot,
   c.description = cls.description,
-  c.status = 'active',
   c.seedVersion = '0.1.1',
   c.createdAt = datetime()
+SET
+  c.labelKo = coalesce(c.labelKo, cls.labelKo),
+  c.labelEn = coalesce(c.labelEn, cls.labelEn),
+  c.facet = coalesce(c.facet, cls.facet),
+  c.kind = coalesce(c.kind, cls.kind),
+  c.isRoot = coalesce(c.isRoot, cls.isRoot),
+  c.description = coalesce(c.description, cls.description),
+  c.seedVersion = coalesce(c.seedVersion, '0.1.1'),
+  c.updatedAt = datetime()
+RETURN count(c) AS ensuredOClassCount
+  `,
+
+  `
+WITH [
+  { id: 'PlaceContext', labelKo: '장소 컨텍스트', labelEn: 'Place Context', facet: 'Location', isRoot: true, kind: 'Category', description: '장소/공간을 의미 단위로 묶는 루트' },
+  { id: 'FoodEntity', labelKo: '음식(엔티티)', labelEn: 'Food (Entity)', facet: 'Food', isRoot: true, kind: 'Category', description: '음식/가게/요리 관련 엔티티 루트' },
+  { id: 'MediaEntity', labelKo: '미디어(엔티티)', labelEn: 'Media (Entity)', facet: 'Media', isRoot: true, kind: 'Category', description: '영화/TV/책 등 미디어 엔티티 루트' },
+  { id: 'PersonEntity', labelKo: '인물(엔티티)', labelEn: 'Person (Entity)', facet: 'Person', isRoot: true, kind: 'Category', description: '인물 엔티티 루트' },
+  { id: 'OrgEntity', labelKo: '조직(엔티티)', labelEn: 'Organization (Entity)', facet: 'Organization', isRoot: true, kind: 'Category', description: '조직/회사 엔티티 루트' },
+  { id: 'ProjectEntity', labelKo: '프로젝트(엔티티)', labelEn: 'Project (Entity)', facet: 'Project', isRoot: true, kind: 'Category', description: '프로젝트 엔티티 루트' },
+  { id: 'TopicEntity', labelKo: '주제(엔티티)', labelEn: 'Topic (Entity)', facet: 'Topic', isRoot: true, kind: 'Category', description: '주제/키워드 엔티티 루트' },
+  { id: 'AnimalEntity', labelKo: '동물(엔티티)', labelEn: 'Animal (Entity)', facet: 'Animal', isRoot: true, kind: 'Category', description: '동물 엔티티 루트' }
+] AS classes
+UNWIND classes AS cls
+MERGE (c:OClass {id: cls.id})
+ON CREATE SET
+  c.labelKo = cls.labelKo,
+  c.labelEn = cls.labelEn,
+  c.facet = cls.facet,
+  c.kind = cls.kind,
+  c.isRoot = cls.isRoot,
+  c.description = cls.description,
+  c.seedVersion = '0.1.3',
+  c.createdAt = datetime()
+SET
+  c.labelKo = coalesce(c.labelKo, cls.labelKo),
+  c.labelEn = coalesce(c.labelEn, cls.labelEn),
+  c.facet = coalesce(c.facet, cls.facet),
+  c.kind = coalesce(c.kind, cls.kind),
+  c.isRoot = coalesce(c.isRoot, cls.isRoot),
+  c.description = coalesce(c.description, cls.description),
+  c.seedVersion = coalesce(c.seedVersion, '0.1.3'),
+  c.updatedAt = datetime()
 RETURN count(c) AS ensuredOClassCount
   `,
 
@@ -183,7 +225,6 @@ ON CREATE SET
   c.kind = cls.kind,
   c.isRoot = cls.isRoot,
   c.description = cls.description,
-  c.status = 'inactive',
   c.seedVersion = '0.1.1-opt',
   c.createdAt = datetime()
 RETURN count(c) AS ensuredOClassCount
@@ -226,7 +267,6 @@ ON CREATE SET
   c.kind = cls.kind,
   c.isRoot = cls.isRoot,
   c.description = cls.description,
-  c.status = 'inactive',
   c.seedVersion = '0.1.1-opt',
   c.createdAt = datetime()
 RETURN count(c) AS ensuredOClassCount

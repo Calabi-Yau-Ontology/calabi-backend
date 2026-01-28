@@ -110,10 +110,32 @@ export class OntologyAutoClassifyService {
     }
 
     const snapshot = await this.adminService.getSnapshot();
+    const availableFacets = new Set(
+      (snapshot?.oClasses ?? [])
+        .map((c: any) => this.normalizeFacet(c?.facet))
+        .filter((facet): facet is string => !!facet),
+    );
+    const usableUnclassified = unclassified.filter((c) => {
+      const facet = this.normalizeFacet(
+        this.getFacetForConceptType(c.conceptType),
+      );
+      return facet ? availableFacets.has(facet) : false;
+    });
+    if (!usableUnclassified.length) {
+      await this.requestEventActivitiesOnly({
+        eventId: params.eventId,
+        eventTitle: params.eventTitle,
+        normalizedTextEn: params.normalizedTextEn ?? null,
+        snapshot,
+      });
+      return;
+    }
+
     const conceptFacets = Array.from(
       new Set(
-        unclassified
+        usableUnclassified
           .map((c) => this.getFacetForConceptType(c.conceptType))
+          .map((facet) => this.normalizeFacet(facet))
           .filter((facet): facet is string => Boolean(facet)),
       ),
     );
@@ -124,7 +146,7 @@ export class OntologyAutoClassifyService {
     if (!filteredSnapshot.oClasses.length) return;
 
     const payload: ClassifyRequestPayload = {
-      concepts: unclassified,
+      concepts: usableUnclassified,
       snapshot: filteredSnapshot,
       mode: 'existing_only',
       eventId: params.eventId,
@@ -137,7 +159,7 @@ export class OntologyAutoClassifyService {
 
     const classifications = response.classifications ?? [];
     const requestMap = new Map(
-      unclassified.map((c) => [
+      usableUnclassified.map((c) => [
         c.conceptKey,
         { conceptType: c.conceptType, conceptName: c.conceptName },
       ]),
@@ -362,6 +384,12 @@ export class OntologyAutoClassifyService {
       Animal: 'Animal',
     };
     return map[type] ?? null;
+  }
+
+  private normalizeFacet(value: unknown): string | null {
+    if (typeof value !== 'string') return null;
+    const normalized = value.trim().toLowerCase();
+    return normalized.length ? normalized : null;
   }
 
   private async requestMlClassify(

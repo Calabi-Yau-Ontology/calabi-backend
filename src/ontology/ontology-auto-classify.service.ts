@@ -40,13 +40,6 @@ type ClassifyResponsePayload = {
   errors?: Array<Record<string, any>>;
 };
 
-type TaxonomyPayload = {
-  oClassId: string;
-  confidence?: number;
-  source?: string;
-  reason?: string | null;
-};
-
 const ML_CLASSIFY_TIMEOUT_MS = 5000;
 
 @Injectable()
@@ -59,29 +52,6 @@ export class OntologyAutoClassifyService {
     private readonly httpService: HttpService,
     private readonly adminService: OntologyAdminService,
   ) {}
-
-  async classifyFromTaxonomy(params: {
-    conceptName: string;
-    conceptType: ConceptType;
-    taxonomy?: TaxonomyPayload;
-  }): Promise<void> {
-    if (!this.isAutoClassifyEnabled()) return;
-    const taxonomy = params.taxonomy;
-    if (!taxonomy?.oClassId) return;
-
-    const threshold = this.getAutoClassifyMinConfidence();
-    const confidence = taxonomy.confidence ?? 0;
-    if (confidence < threshold) return;
-
-    await this.classifyConceptByOClass({
-      conceptName: params.conceptName,
-      conceptType: params.conceptType,
-      oClassId: taxonomy.oClassId,
-      confidence,
-      source: taxonomy.source ?? 'llm',
-      reason: taxonomy.reason ?? null,
-    });
-  }
 
   async autoClassifyUnclassifiedConcepts(params: {
     concepts: Array<{

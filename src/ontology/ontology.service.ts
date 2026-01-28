@@ -203,12 +203,6 @@ export class OntologyService {
         conceptType: ConceptType;
         surface: string | null;
         span?: { start: number; end: number } | null;
-        taxonomy?: {
-          oClassId: string;
-          confidence?: number;
-          source?: string;
-          reason?: string | null;
-        };
       }
     >();
 
@@ -221,14 +215,6 @@ export class OntologyService {
       if (!canonicalName) continue;
       const conceptKey = `${mappedType}::${canonicalName}`;
 
-      const taxonomy = m?.taxonomy?.oClassId
-        ? {
-            oClassId: m.taxonomy.oClassId,
-            confidence: m.taxonomy.confidence,
-            source: m.taxonomy.source,
-            reason: m.taxonomy.reason ?? null,
-          }
-        : undefined;
       const span = m?.span ?? null;
 
       const existing = conceptMap.get(conceptKey);
@@ -238,7 +224,6 @@ export class OntologyService {
           conceptType: mappedType,
           surface: m?.surface?.trim() ?? null,
           span,
-          taxonomy,
         });
         continue;
       }
@@ -250,13 +235,6 @@ export class OntologyService {
         existing.span = span;
       }
 
-      if (taxonomy?.oClassId) {
-        const existingConfidence = existing.taxonomy?.confidence ?? -1;
-        const nextConfidence = taxonomy.confidence ?? -1;
-        if (!existing.taxonomy?.oClassId || nextConfidence > existingConfidence) {
-          existing.taxonomy = taxonomy;
-        }
-      }
     }
 
     const concepts = Array.from(conceptMap.values()).map((value) => ({
@@ -264,10 +242,9 @@ export class OntologyService {
       conceptType: value.conceptType,
       surface: value.surface,
       span: value.span ?? null,
-      taxonomy: value.taxonomy,
     }));
 
-    for (const { canonicalName, conceptType, surface, taxonomy } of concepts) {
+    for (const { canonicalName, conceptType, surface } of concepts) {
       const conceptProps: Record<string, any> = {
         source: 'ml',
       };
@@ -289,11 +266,6 @@ export class OntologyService {
         conceptType,
         surface,
       );
-      await this.autoClassifyService.classifyFromTaxonomy({
-        conceptName: canonicalName,
-        conceptType,
-        taxonomy,
-      });
     }
 
     await this.autoClassifyService.autoClassifyUnclassifiedConcepts({

@@ -414,6 +414,13 @@ export class OntologyAutoClassifyService {
       return data ?? null;
     } catch (error: unknown) {
       const err = this.normalizeAxiosError(error);
+      const status = err.response?.status;
+      const errorData = err.response?.data as any;
+      if (status && errorData) {
+        this.logger.warn(
+          `ML classify request failed (status ${status}): ${JSON.stringify(errorData)}`,
+        );
+      }
       this.logger.warn(
         `ML classify request failed: ${err.message}`,
         err.stack,

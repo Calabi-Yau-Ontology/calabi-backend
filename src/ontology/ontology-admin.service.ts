@@ -1,6 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { Neo4jService } from 'src/neo4j/neo4j.service';
 import { CONCEPT_TYPE_LABELS } from './constants/concept.types';
+import {
+  OntologySnapshotResponseDto,
+  OClassDto,
+  OClassEdgeDto,
+} from './dto/ontology-snapshot.dto';
+import { UnclassifiedConceptDto } from './dto/unclassified-concept.dto';
 import { UnclassifiedQueryDto } from './dto/unclassified-query.dto';
 
 type OClassRow = {
@@ -15,15 +21,15 @@ type OClassRow = {
 };
 
 type OClassEdgeRow = {
-  child: string;
-  parent: string;
+  childId: string;
+  parentId: string;
 };
 
 @Injectable()
 export class OntologyAdminService {
   constructor(private readonly neo4j: Neo4jService) {}
 
-  async getSnapshot() {
+  async getSnapshot(): Promise<OntologySnapshotResponseDto> {
     const classesCypher = `
       MATCH (c:OClass)
       WHERE c.taxonomyVersion = 'v2'
@@ -44,16 +50,14 @@ export class OntologyAdminService {
       MATCH (child:OClass)-[:OSUBCLASS_OF]->(parent:OClass)
       WHERE child.taxonomyVersion = 'v2'
         AND parent.taxonomyVersion = 'v2'
-      RETURN { child: child.id, parent: parent.id } AS e
+      RETURN { childId: child.id, parentId: parent.id } AS e
       ORDER BY child.id, parent.id
     `;
 
     const classesRes = await this.neo4j.run(classesCypher, {});
     const edgesRes = await this.neo4j.run(edgesCypher, {});
 
-    const oClasses = classesRes.records.map(
-      (r) => r.get('c') as OClassRow,
-    );
+    const oClasses = classesRes.records.map((r) => r.get('c') as OClassRow);
     const subclassEdges = edgesRes.records.map(
       (r) => r.get('e') as OClassEdgeRow,
     );
@@ -65,16 +69,19 @@ export class OntologyAdminService {
           .filter((v): v is string => typeof v === 'string' && v.length > 0),
       ),
     );
+    const seedVersion = seedVersions[0] ?? null;
 
     return {
-      seedVersions,
+      seedVersion,
       conceptTypes: CONCEPT_TYPE_LABELS,
-      oClasses,
-      subclassEdges,
+      oClasses: oClasses as OClassDto[],
+      subclassEdges: subclassEdges as OClassEdgeDto[],
     };
   }
 
-  async getUnclassifiedConcepts(dto: UnclassifiedQueryDto) {
+  async getUnclassifiedConcepts(
+    dto: UnclassifiedQueryDto,
+  ): Promise<UnclassifiedConceptDto[]> {
     const limit = dto.limit ?? 100;
     const minMentions = dto.minMentions ?? null;
     const since = dto.since ?? null;
@@ -112,6 +119,6 @@ export class OntologyAdminService {
       conceptType,
     });
 
-    return res.records.map((r) => r.get('row'));
+    return res.records.map((r) => r.get('row') as UnclassifiedConceptDto);
   }
 }

@@ -25,6 +25,8 @@ import { ListOntologyRunsDto } from './dto/list-ontology-runs.dto';
 import { UnclassifiedQueryDto } from './dto/unclassified-query.dto';
 import { ApplyOntologyRunDto } from './dto/apply-ontology-run.dto';
 import { HttpErrorResponseDto } from 'src/common/dto/http-error-response.dto';
+import { OntologySnapshotResponseDto } from './dto/ontology-snapshot.dto';
+import { UnclassifiedConceptDto } from './dto/unclassified-concept.dto';
 
 @ApiTags('온톨로지')
 @ApiBearerAuth('access-token')
@@ -42,6 +44,7 @@ export class OntologyController {
     summary: 'Ontology snapshot 조회',
     description: 'OClass 트리 및 seedVersion, conceptType 목록을 반환합니다.',
   })
+  @ApiOkResponse({ type: OntologySnapshotResponseDto })
   async getSnapshot() {
     return this.adminService.getSnapshot();
   }
@@ -52,6 +55,7 @@ export class OntologyController {
     description:
       'CLASSIFIED_AS(active=true) 관계가 없는 Concept 목록을 반환합니다.',
   })
+  @ApiOkResponse({ type: [UnclassifiedConceptDto] })
   async getUnclassified(@Query() dto: UnclassifiedQueryDto) {
     return this.adminService.getUnclassifiedConcepts(dto);
   }

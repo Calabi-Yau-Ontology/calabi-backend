@@ -297,8 +297,7 @@ export class SuggestionsService {
         throw new BadRequestException('Pairs are required');
       }
       if (
-        normalizeEventTitle(beforeTitle) !==
-        normalizeEventTitle(event.title)
+        normalizeEventTitle(beforeTitle) !== normalizeEventTitle(event.title)
       ) {
         throw new ConflictException('Event title has changed');
       }
@@ -327,9 +326,7 @@ export class SuggestionsService {
     await this.eventsRepo.save(event);
   }
 
-  private extractAppliedPairs(
-    pairs: ConsistencyDecisionPairDto[],
-  ): Array<{
+  private extractAppliedPairs(pairs: ConsistencyDecisionPairDto[]): Array<{
     canonicalName: string;
     conceptType: ConceptType;
     surface: string;
@@ -484,7 +481,6 @@ export class SuggestionsService {
       );
     }
   }
-
 
   private raiseIfNerFailed(ner: NERResponseDto): void {
     if (!ner?.errors?.length) {

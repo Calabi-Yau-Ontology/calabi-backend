@@ -192,7 +192,7 @@ export class OntologyAutoClassifyService {
 
     for (const record of res.records) {
       const key = record.get('key') as string;
-      const countValue = record.get('activeCount') as any;
+      const countValue = record.get('activeCount');
       const activeCount =
         typeof countValue === 'number'
           ? countValue
@@ -349,10 +349,7 @@ export class OntologyAutoClassifyService {
           `ML classify request failed (status ${status}): ${JSON.stringify(errorData)}`,
         );
       }
-      this.logger.warn(
-        `ML classify request failed: ${err.message}`,
-        err.stack,
-      );
+      this.logger.warn(`ML classify request failed: ${err.message}`, err.stack);
       return null;
     }
   }

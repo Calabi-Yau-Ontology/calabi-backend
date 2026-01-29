@@ -48,8 +48,9 @@ export default () => ({
     // Feature flag: keep Wikidata expansion code, but disable by default.
     // Set WIKIDATA_EXPANSION_ENABLED=true to re-enable.
     expansionEnabled:
-      String(process.env.WIKIDATA_EXPANSION_ENABLED ?? 'false').toLowerCase() ===
-      'true',
+      String(
+        process.env.WIKIDATA_EXPANSION_ENABLED ?? 'false',
+      ).toLowerCase() === 'true',
     sparqlEndpoint: process.env.WIKIDATA_SPARQL_ENDPOINT,
     searchEndpoint: process.env.WIKIDATA_SEARCH_ENDPOINT,
     language: process.env.WIKIDATA_LANGUAGE || 'ko,en',

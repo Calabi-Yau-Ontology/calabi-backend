@@ -58,7 +58,11 @@ describe('OntologyRunService.applyRun', () => {
           records: [{ get: () => 1 }],
         })
         .mockResolvedValueOnce({
-          records: [{ get: () => ({ applied: 1, missingConcept: 0, missingOClass: 0 }) }],
+          records: [
+            {
+              get: () => ({ applied: 1, missingConcept: 0, missingOClass: 0 }),
+            },
+          ],
         }),
       commit: jest.fn(),
       rollback: jest.fn(),

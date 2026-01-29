@@ -210,7 +210,6 @@ export class EventsController {
     const userId = getUserIdOrThrow(req);
     return this.eventsService.remove(userId, id);
   }
-
 }
 
 type AuthenticatedRequest = RequestWithUser;

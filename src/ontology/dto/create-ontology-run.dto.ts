@@ -1,8 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsIn, IsOptional, IsString } from 'class-validator';
-import {
-  ONTOLOGY_RUN_KINDS,
-} from '../constants/ontology-run.constants';
+import { ONTOLOGY_RUN_KINDS } from '../constants/ontology-run.constants';
 import type { OntologyRunKind } from '../constants/ontology-run.constants';
 
 export class CreateOntologyRunDto {
@@ -14,7 +12,9 @@ export class CreateOntologyRunDto {
   @IsIn(ONTOLOGY_RUN_KINDS)
   kind!: OntologyRunKind;
 
-  @ApiPropertyOptional({ description: '입력 payload (CQ 목록 또는 concept 목록)' })
+  @ApiPropertyOptional({
+    description: '입력 payload (CQ 목록 또는 concept 목록)',
+  })
   @IsOptional()
   input?: Record<string, any>;
 

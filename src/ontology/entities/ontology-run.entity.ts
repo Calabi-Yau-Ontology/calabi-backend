@@ -35,7 +35,9 @@ export class OntologyRun {
   @Column({ type: 'varchar', length: 24, default: 'proposed' })
   status!: OntologyRunStatus;
 
-  @ApiPropertyOptional({ description: '입력 payload (CQ 목록 또는 concept 목록)' })
+  @ApiPropertyOptional({
+    description: '입력 payload (CQ 목록 또는 concept 목록)',
+  })
   @Column({ type: 'jsonb', nullable: true })
   inputJson?: Record<string, any> | null;
 

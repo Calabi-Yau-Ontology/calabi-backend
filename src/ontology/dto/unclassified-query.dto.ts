@@ -29,12 +29,9 @@ export class UnclassifiedQueryDto {
   })
   @IsOptional()
   @IsDateString()
-  @Matches(
-    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/,
-    {
-      message: 'since must be RFC3339 with time and timezone',
-    },
-  )
+  @Matches(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/, {
+    message: 'since must be RFC3339 with time and timezone',
+  })
   since?: string;
 
   @ApiPropertyOptional({ description: '최소 멘션 횟수', example: 3 })

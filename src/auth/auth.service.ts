@@ -22,9 +22,7 @@ export class AuthService {
 
   async loginWithGoogle(profile: GoogleProfile): Promise<LoginOutput> {
     if (!profile.email) {
-      throw new UnauthorizedException(
-        ERROR_MESSAGES.AUTH.GOOGLE_EMAIL_MISSING,
-      );
+      throw new UnauthorizedException(ERROR_MESSAGES.AUTH.GOOGLE_EMAIL_MISSING);
     }
 
     let user = await this.usersService.findByEmail(profile.email);

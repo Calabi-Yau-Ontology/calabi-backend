@@ -86,7 +86,11 @@ export class CategoriesController {
     summary: '카테고리 목록 조회',
     description: '사용자에게 연결된 모든 일정 카테고리를 조회합니다.',
   })
-  @ApiOkResponse({ description: '카테고리 목록', type: Category, isArray: true })
+  @ApiOkResponse({
+    description: '카테고리 목록',
+    type: Category,
+    isArray: true,
+  })
   @ApiUnauthorizedResponse({
     description: 'JWT 미포함 또는 만료',
     ...buildErrorSchema({

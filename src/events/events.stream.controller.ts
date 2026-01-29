@@ -1,5 +1,10 @@
 import { Controller } from '@nestjs/common';
-import { Ctx, EventPattern, KafkaContext, Payload } from '@nestjs/microservices';
+import {
+  Ctx,
+  EventPattern,
+  KafkaContext,
+  Payload,
+} from '@nestjs/microservices';
 
 @Controller()
 export class EventsStreamController {
@@ -28,7 +33,6 @@ export class EventsStreamController {
       }
     }
 
-    // eslint-disable-next-line no-console
     console.log('Real-time Event Log', {
       key,
       value: parsed,

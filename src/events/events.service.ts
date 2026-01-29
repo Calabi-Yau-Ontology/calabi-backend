@@ -263,7 +263,7 @@ export class EventsService implements OnModuleInit, OnModuleDestroy {
 
       const nextStatus = hasNewKey
         ? ('pending' as const)
-        : event.nerCacheStatus ?? ('ready' as const);
+        : (event.nerCacheStatus ?? ('ready' as const));
 
       await this.eventsRepo.update(event.id, {
         nerCacheKey: nextKey,

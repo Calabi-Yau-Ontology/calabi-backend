@@ -32,5 +32,5 @@ export const NEO4J_SCHEMA_STATEMENTS: string[] = [
    FOR (c:Concept) REQUIRE c.wikidataQid IS UNIQUE`,
 
   `CREATE INDEX concept_expanded_at_idx IF NOT EXISTS
-   FOR (c:Concept) ON (c.wikidataExpandedAt)`
+   FOR (c:Concept) ON (c.wikidataExpandedAt)`,
 ];

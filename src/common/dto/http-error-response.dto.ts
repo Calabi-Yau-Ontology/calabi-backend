@@ -19,5 +19,4 @@ export class HttpErrorResponseDto {
     required: false,
   })
   error?: string;
-
 }

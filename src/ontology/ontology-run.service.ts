@@ -162,9 +162,7 @@ export class OntologyRunService {
             classificationSkippedMissingConcept = Number(
               row.missingConcept ?? 0,
             );
-            classificationSkippedMissingOClass = Number(
-              row.missingOClass ?? 0,
-            );
+            classificationSkippedMissingOClass = Number(row.missingOClass ?? 0);
             classificationSkippedWrongFacet = Number(row.wrongFacet ?? 0);
             classificationSkippedNonLeaf = Number(row.nonLeaf ?? 0);
           }
@@ -185,9 +183,7 @@ export class OntologyRunService {
             eventClassificationSkippedMissingOClass = Number(
               row.missingOClass ?? 0,
             );
-            eventClassificationSkippedWrongFacet = Number(
-              row.wrongFacet ?? 0,
-            );
+            eventClassificationSkippedWrongFacet = Number(row.wrongFacet ?? 0);
             eventClassificationSkippedNonLeaf = Number(row.nonLeaf ?? 0);
           }
         }

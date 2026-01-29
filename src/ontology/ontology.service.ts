@@ -234,7 +234,6 @@ export class OntologyService {
       if (!existing.span && span) {
         existing.span = span;
       }
-
     }
 
     const concepts = Array.from(conceptMap.values()).map((value) => ({
@@ -279,11 +278,13 @@ export class OntologyService {
     for (const { canonicalName } of concepts) {
       if (!this.isWikidataExpansionEnabled()) break;
 
-      void this.expansionService.expandConceptByName(canonicalName).catch(() => {
-        // Intentionally swallow errors:
-        // - Expansion is optional and should never break the ingestion pipeline.
-        // - Details are handled inside ExpansionService logs/markers.
-      });
+      void this.expansionService
+        .expandConceptByName(canonicalName)
+        .catch(() => {
+          // Intentionally swallow errors:
+          // - Expansion is optional and should never break the ingestion pipeline.
+          // - Details are handled inside ExpansionService logs/markers.
+        });
     }
   }
 

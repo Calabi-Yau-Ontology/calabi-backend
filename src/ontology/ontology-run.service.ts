@@ -128,9 +128,13 @@ export class OntologyRunService {
         let classificationApplied = 0;
         let classificationSkippedMissingConcept = 0;
         let classificationSkippedMissingOClass = 0;
+        let classificationSkippedWrongFacet = 0;
+        let classificationSkippedNonLeaf = 0;
         let eventClassificationApplied = 0;
         let eventClassificationSkippedMissingEvent = 0;
         let eventClassificationSkippedMissingOClass = 0;
+        let eventClassificationSkippedWrongFacet = 0;
+        let eventClassificationSkippedNonLeaf = 0;
 
         if (oClasses.length) {
           const res = await tx.run(this.buildOClassUpsertCypher(), {
@@ -147,7 +151,7 @@ export class OntologyRunService {
         }
 
         if (classifications.length) {
-          const res = await tx.run(this.buildClassificationCypher(), {
+          const res = await tx.run(this.buildConceptClassificationCypher(), {
             rows: classifications,
             runId,
             replaceActive,
@@ -161,6 +165,8 @@ export class OntologyRunService {
             classificationSkippedMissingOClass = Number(
               row.missingOClass ?? 0,
             );
+            classificationSkippedWrongFacet = Number(row.wrongFacet ?? 0);
+            classificationSkippedNonLeaf = Number(row.nonLeaf ?? 0);
           }
         }
 
@@ -179,6 +185,10 @@ export class OntologyRunService {
             eventClassificationSkippedMissingOClass = Number(
               row.missingOClass ?? 0,
             );
+            eventClassificationSkippedWrongFacet = Number(
+              row.wrongFacet ?? 0,
+            );
+            eventClassificationSkippedNonLeaf = Number(row.nonLeaf ?? 0);
           }
         }
 
@@ -189,9 +199,13 @@ export class OntologyRunService {
           classificationApplied,
           classificationSkippedMissingConcept,
           classificationSkippedMissingOClass,
+          classificationSkippedWrongFacet,
+          classificationSkippedNonLeaf,
           eventClassificationApplied,
           eventClassificationSkippedMissingEvent,
           eventClassificationSkippedMissingOClass,
+          eventClassificationSkippedWrongFacet,
+          eventClassificationSkippedNonLeaf,
           replaceActive,
         };
       } catch (e) {
@@ -232,19 +246,31 @@ export class OntologyRunService {
     `;
   }
 
-  private buildClassificationCypher() {
+  private buildConceptClassificationCypher() {
     return `
       UNWIND $rows AS row
       OPTIONAL MATCH (c:Concept { name: row.conceptName, type: row.conceptType })
       OPTIONAL MATCH (o:OClass { id: row.oClassId })
+      WITH row, c, o,
+           CASE WHEN c IS NULL THEN 1 ELSE 0 END AS missC,
+           CASE WHEN o IS NULL THEN 1 ELSE 0 END AS missO,
+           CASE
+             WHEN o IS NOT NULL AND o.facet <> 'Entity' THEN 1
+             ELSE 0
+           END AS wrongFacet,
+           CASE
+             WHEN o IS NOT NULL AND o.facet = 'Entity'
+               AND (o)<-[:OSUBCLASS_OF]-(:OClass) THEN 1
+             ELSE 0
+           END AS nonLeaf
       WITH row, c,
            CASE
              WHEN o IS NULL THEN NULL
-             WHEN o.facet = 'Activity' THEN NULL
+             WHEN o.facet <> 'Entity' THEN NULL
+             WHEN (o)<-[:OSUBCLASS_OF]-(:OClass) THEN NULL
              ELSE o
            END AS o,
-           CASE WHEN c IS NULL THEN 1 ELSE 0 END AS missC,
-           CASE WHEN o IS NULL THEN 1 ELSE 0 END AS missO,
+           missC, missO, wrongFacet, nonLeaf,
            CASE WHEN c IS NOT NULL AND o IS NOT NULL THEN 1 ELSE 0 END AS applied
       FOREACH (_ IN CASE WHEN $replaceActive AND c IS NOT NULL AND o IS NOT NULL THEN [1] ELSE [] END |
         MATCH (c)-[old:CLASSIFIED_AS]->(:OClass)
@@ -267,7 +293,9 @@ export class OntologyRunService {
       RETURN {
         applied: sum(applied),
         missingConcept: sum(missC),
-        missingOClass: sum(missO)
+        missingOClass: sum(missO),
+        wrongFacet: sum(wrongFacet),
+        nonLeaf: sum(nonLeaf)
       } AS r
     `;
   }
@@ -277,14 +305,26 @@ export class OntologyRunService {
       UNWIND $rows AS row
       OPTIONAL MATCH (e:Event { eventId: row.eventId })
       OPTIONAL MATCH (o:OClass { id: row.oClassId })
+      WITH row, e, o,
+           CASE WHEN e IS NULL THEN 1 ELSE 0 END AS missE,
+           CASE WHEN o IS NULL THEN 1 ELSE 0 END AS missO,
+           CASE
+             WHEN o IS NOT NULL AND o.facet <> 'Activity' THEN 1
+             ELSE 0
+           END AS wrongFacet,
+           CASE
+             WHEN o IS NOT NULL AND o.facet = 'Activity'
+               AND (o)<-[:OSUBCLASS_OF]-(:OClass) THEN 1
+             ELSE 0
+           END AS nonLeaf
       WITH row, e,
            CASE
              WHEN o IS NULL THEN NULL
              WHEN o.facet <> 'Activity' THEN NULL
+             WHEN (o)<-[:OSUBCLASS_OF]-(:OClass) THEN NULL
              ELSE o
            END AS o,
-           CASE WHEN e IS NULL THEN 1 ELSE 0 END AS missE,
-           CASE WHEN o IS NULL THEN 1 ELSE 0 END AS missO,
+           missE, missO, wrongFacet, nonLeaf,
            CASE WHEN e IS NOT NULL AND o IS NOT NULL THEN 1 ELSE 0 END AS applied
       FOREACH (_ IN CASE WHEN $replaceActive AND e IS NOT NULL AND o IS NOT NULL THEN [1] ELSE [] END |
         MATCH (e)-[old:HAS_ACTIVITY]->(:OClass)
@@ -307,7 +347,9 @@ export class OntologyRunService {
       RETURN {
         applied: sum(applied),
         missingEvent: sum(missE),
-        missingOClass: sum(missO)
+        missingOClass: sum(missO),
+        wrongFacet: sum(wrongFacet),
+        nonLeaf: sum(nonLeaf)
       } AS r
     `;
   }

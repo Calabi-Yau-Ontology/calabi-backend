@@ -84,134 +84,76 @@ export class OntologyAutoClassifyService {
       surface: c.surface ?? null,
       span: c.span ?? null,
     }));
-    if (!inputs.length || !inputs.some((c) => this.isConceptAutoClassifiable(c.conceptType))) {
-      await this.requestEventActivitiesOnly({
-        eventId: params.eventId,
-        eventTitle: params.eventTitle,
-        normalizedTextEn: params.normalizedTextEn ?? null,
-        snapshot: null,
-      });
-      return;
-    }
-    const candidates = inputs.filter((c) =>
-      this.isConceptAutoClassifiable(c.conceptType),
-    );
-    const targetConcepts = candidates.length ? candidates : inputs;
-
-    const unclassified = await this.filterUnclassifiedConcepts(targetConcepts);
-    if (!unclassified.length) {
-      await this.requestEventActivitiesOnly({
-        eventId: params.eventId,
-        eventTitle: params.eventTitle,
-        normalizedTextEn: params.normalizedTextEn ?? null,
-        snapshot: null,
-      });
-      return;
-    }
 
     const snapshot = await this.adminService.getSnapshot();
-    const availableFacets = new Set(
-      (snapshot?.oClasses ?? [])
-        .map((c: any) => this.normalizeFacet(c?.facet))
-        .filter((facet): facet is string => !!facet),
-    );
-    const usableUnclassified = unclassified.filter((c) => {
-      const facet = this.normalizeFacet(
-        this.getFacetForConceptType(c.conceptType),
-      );
-      return facet ? availableFacets.has(facet) : false;
-    });
-    if (!usableUnclassified.length) {
-      await this.requestEventActivitiesOnly({
+    const entitySnapshot = this.buildSnapshotPayload(snapshot, ['Entity']);
+    const activitySnapshot = this.buildSnapshotPayload(snapshot, ['Activity']);
+
+    const unclassified = inputs.length
+      ? await this.filterUnclassifiedConcepts(inputs)
+      : [];
+    const usableUnclassified =
+      entitySnapshot.oClasses.length > 0 ? unclassified : [];
+
+    let appliedEvent = false;
+
+    if (usableUnclassified.length) {
+      const payload: ClassifyRequestPayload = {
+        concepts: usableUnclassified,
+        snapshot: entitySnapshot,
+        mode: 'existing_only',
         eventId: params.eventId,
         eventTitle: params.eventTitle,
-        normalizedTextEn: params.normalizedTextEn ?? null,
-        snapshot,
-      });
-      return;
-    }
+        eventNormalizedTextEn: params.normalizedTextEn ?? null,
+      };
 
-    const conceptFacets = Array.from(
-      new Set(
-        usableUnclassified
-          .map((c) => this.getFacetForConceptType(c.conceptType))
-          .map((facet) => this.normalizeFacet(facet))
-          .filter((facet): facet is string => Boolean(facet)),
-      ),
-    );
-    const filteredSnapshot = this.buildSnapshotPayload(snapshot, [
-      ...conceptFacets,
-      'Activity',
-    ]);
-    if (!filteredSnapshot.oClasses.length) return;
+      const response = await this.requestMlClassify(payload);
+      if (response) {
+        const classifications = response.classifications ?? [];
+        const requestMap = new Map(
+          usableUnclassified.map((c) => [
+            c.conceptKey,
+            { conceptType: c.conceptType, conceptName: c.conceptName },
+          ]),
+        );
+        appliedEvent = await this.applyEventActivities(
+          response,
+          params.eventId,
+        );
 
-    const payload: ClassifyRequestPayload = {
-      concepts: usableUnclassified,
-      snapshot: filteredSnapshot,
-      mode: 'existing_only',
-      eventId: params.eventId,
-      eventTitle: params.eventTitle,
-      eventNormalizedTextEn: params.normalizedTextEn ?? null,
-    };
-
-    const response = await this.requestMlClassify(payload);
-    if (!response) return;
-
-    const classifications = response.classifications ?? [];
-    const requestMap = new Map(
-      usableUnclassified.map((c) => [
-        c.conceptKey,
-        { conceptType: c.conceptType, conceptName: c.conceptName },
-      ]),
-    );
-    const appliedEvent = await this.applyEventActivities(
-      response,
-      params.eventId,
-    );
-
-    const filtered = classifications.filter((item) => {
-      if (!item?.conceptKey) return false;
-      const expected = requestMap.get(item.conceptKey);
-      if (!expected) return false;
-      return (
-        item.conceptType === expected.conceptType &&
-        item.conceptName === expected.conceptName
-      );
-    });
-    if (!filtered.length) {
-      if (!appliedEvent) {
-        await this.requestEventActivitiesOnly({
-          eventId: params.eventId,
-          eventTitle: params.eventTitle,
-          normalizedTextEn: params.normalizedTextEn ?? null,
-          snapshot,
+        const filtered = classifications.filter((item) => {
+          if (!item?.conceptKey) return false;
+          const expected = requestMap.get(item.conceptKey);
+          if (!expected) return false;
+          return (
+            item.conceptType === expected.conceptType &&
+            item.conceptName === expected.conceptName
+          );
         });
+
+        const threshold = this.getAutoClassifyMinConfidence();
+        for (const item of filtered) {
+          const confidence = item.confidence ?? 0;
+          if (!item.oClassId || confidence < threshold) continue;
+          await this.classifyConceptByOClass({
+            conceptName: item.conceptName,
+            conceptType: item.conceptType,
+            oClassId: item.oClassId,
+            confidence,
+            source: 'llm',
+            reason: item.rationale ?? null,
+            expectedFacet: 'Entity',
+          });
+        }
       }
-      return;
     }
 
-    const threshold = this.getAutoClassifyMinConfidence();
-    for (const item of filtered) {
-      const confidence = item.confidence ?? 0;
-      if (!item.oClassId || confidence < threshold) continue;
-      const expectedFacet = this.getFacetForConceptType(item.conceptType);
-      if (expectedFacet === 'Activity') continue;
-      await this.classifyConceptByOClass({
-        conceptName: item.conceptName,
-        conceptType: item.conceptType,
-        oClassId: item.oClassId,
-        confidence,
-        source: 'llm',
-        reason: item.rationale ?? null,
-        expectedFacet,
-      });
-    }
     if (!appliedEvent) {
       await this.requestEventActivitiesOnly({
         eventId: params.eventId,
         eventTitle: params.eventTitle,
         normalizedTextEn: params.normalizedTextEn ?? null,
-        snapshot,
+        snapshot: activitySnapshot,
       });
     }
   }
@@ -335,9 +277,14 @@ export class OntologyAutoClassifyService {
   } {
     const rawClasses = Array.isArray(snapshot?.oClasses) ? snapshot.oClasses : [];
     const facetSet =
-      Array.isArray(facets) && facets.length ? new Set(facets) : null;
+      Array.isArray(facets) && facets.length
+        ? new Set(facets.map((facet) => this.normalizeFacet(facet)))
+        : null;
     const filteredClasses = facetSet
-      ? rawClasses.filter((c) => c?.facet && facetSet.has(c.facet))
+      ? rawClasses.filter((c) => {
+          const facet = this.normalizeFacet(c?.facet);
+          return facet && facetSet.has(facet);
+        })
       : rawClasses;
 
     const idSet = new Set(
@@ -358,32 +305,13 @@ export class OntologyAutoClassifyService {
 
     const seedVersion = Array.isArray(snapshot?.seedVersions)
       ? snapshot.seedVersions[0] ?? null
-      : snapshot?.seedVersions ?? null;
+      : snapshot?.seedVersions ?? snapshot?.seedVersion ?? null;
 
     return {
       oClasses: filteredClasses,
       subclassEdges,
       seedVersion,
     };
-  }
-
-  private isConceptAutoClassifiable(type: ConceptType): boolean {
-    return this.getFacetForConceptType(type) !== 'Activity';
-  }
-
-  private getFacetForConceptType(type: ConceptType): string | null {
-    const map: Record<ConceptType, string> = {
-      Activity: 'Activity',
-      Location: 'Location',
-      Person: 'Person',
-      Project: 'Project',
-      Topic: 'Topic',
-      Organization: 'Organization',
-      Food: 'Food',
-      Media: 'Media',
-      Animal: 'Animal',
-    };
-    return map[type] ?? null;
   }
 
   private normalizeFacet(value: unknown): string | null {
@@ -457,6 +385,7 @@ export class OntologyAutoClassifyService {
       MATCH (c:Concept { name: $conceptName, type: $conceptType })
       MATCH (o:OClass { id: $oClassId })
       WHERE ($expectedFacet IS NULL OR o.facet = $expectedFacet)
+        AND NOT (o)<-[:OSUBCLASS_OF]-(:OClass)
       OPTIONAL MATCH (c)-[r:CLASSIFIED_AS]->(:OClass)
       WHERE coalesce(r.active, true) = true
       WITH c, o, collect(r) AS activeRels
@@ -507,6 +436,7 @@ export class OntologyAutoClassifyService {
       MATCH (e:Event { eventId: $eventId })
       MATCH (o:OClass { id: $oClassId })
       WHERE o.facet = 'Activity'
+        AND NOT (o)<-[:OSUBCLASS_OF]-(:OClass)
       OPTIONAL MATCH (e)-[r:HAS_ACTIVITY]->(:OClass)
       WHERE coalesce(r.active, true) = true
       WITH e, o, collect(r) AS activeRels

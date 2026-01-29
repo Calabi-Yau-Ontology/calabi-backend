@@ -6,7 +6,7 @@ import {
   OClassDto,
   OClassEdgeDto,
 } from './dto/ontology-snapshot.dto';
-import { UnclassifiedConceptDto } from './dto/unclassified-concept.dto';
+import { UnclassifiedContextDto } from './dto/unclassified-context.dto';
 import { UnclassifiedQueryDto } from './dto/unclassified-query.dto';
 
 type OClassRow = {
@@ -79,36 +79,45 @@ export class OntologyAdminService {
     };
   }
 
-  async getUnclassifiedConcepts(
+  async getUnclassifiedContexts(
     dto: UnclassifiedQueryDto,
-  ): Promise<UnclassifiedConceptDto[]> {
+  ): Promise<UnclassifiedContextDto[]> {
     const limit = dto.limit ?? 100;
     const minMentions = dto.minMentions ?? null;
     const since = dto.since ?? null;
-    const conceptType = dto.conceptType ?? null;
 
     const cypher = `
-      MATCH (c:Concept)
+      MATCH (e:Event)
+      WHERE $since IS NULL OR e.startTime >= datetime($since)
+      OPTIONAL MATCH (e)-[ha:HAS_ACTIVITY]->(:OClass)
+      WHERE coalesce(ha.active, true) = true
+      WITH e, count(ha) > 0 AS eventClassified
+      OPTIONAL MATCH (e)-[:MENTIONS]->(c:Concept)
       WHERE NOT EXISTS {
         MATCH (c)-[r:CLASSIFIED_AS]->(:OClass)
         WHERE coalesce(r.active, true) = true
       }
-      AND ($conceptType IS NULL OR c.type = $conceptType)
-
-      OPTIONAL MATCH (e:Event)-[:MENTIONS]->(c)
-      WHERE $since IS NULL OR e.startTime >= datetime($since)
-      WITH c,
-           count(e) AS mentionCount,
-           max(e.startTime) AS lastMentionedAt
-      WHERE $minMentions IS NULL OR mentionCount >= $minMentions
+      WITH e, eventClassified,
+           collect(
+             DISTINCT CASE
+               WHEN c IS NULL THEN NULL
+               ELSE { name: c.name, type: c.type }
+             END
+           ) AS rawMentions
+      WITH e, eventClassified,
+           [m IN rawMentions WHERE m IS NOT NULL] AS mentions
+      WHERE ($minMentions IS NULL OR size(mentions) >= $minMentions)
+        AND (eventClassified = false OR size(mentions) > 0)
       RETURN {
-        name: c.name,
-        type: c.type,
-        createdAt: c.createdAt,
-        mentionCount: mentionCount,
-        lastMentionedAt: lastMentionedAt
+        contextEvent: {
+          id: e.eventId,
+          title: e.title,
+          startTime: toString(e.startTime),
+          activityClassified: eventClassified
+        },
+        unclassifiedMentions: mentions
       } AS row
-      ORDER BY row.lastMentionedAt DESC NULLS LAST, row.mentionCount DESC
+      ORDER BY e.startTime DESC
       LIMIT $limit
     `;
 
@@ -116,9 +125,8 @@ export class OntologyAdminService {
       limit,
       minMentions,
       since,
-      conceptType,
     });
 
-    return res.records.map((r) => r.get('row') as UnclassifiedConceptDto);
+    return res.records.map((r) => r.get('row') as UnclassifiedContextDto);
   }
 }

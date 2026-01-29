@@ -22,11 +22,11 @@ import { OntologyAdminService } from './ontology-admin.service';
 import { CreateOntologyRunDto } from './dto/create-ontology-run.dto';
 import { ConfirmOntologyRunDto } from './dto/confirm-ontology-run.dto';
 import { ListOntologyRunsDto } from './dto/list-ontology-runs.dto';
-import { UnclassifiedQueryDto } from './dto/unclassified-query.dto';
 import { ApplyOntologyRunDto } from './dto/apply-ontology-run.dto';
 import { HttpErrorResponseDto } from 'src/common/dto/http-error-response.dto';
 import { OntologySnapshotResponseDto } from './dto/ontology-snapshot.dto';
-import { UnclassifiedConceptDto } from './dto/unclassified-concept.dto';
+import { UnclassifiedContextDto } from './dto/unclassified-context.dto';
+import { UnclassifiedQueryDto } from './dto/unclassified-query.dto';
 
 @ApiTags('온톨로지')
 @ApiBearerAuth('access-token')
@@ -49,15 +49,15 @@ export class OntologyController {
     return this.adminService.getSnapshot();
   }
 
-  @Get('concepts/unclassified')
+  @Get('unclassified')
   @ApiOperation({
-    summary: '미분류 Concept 목록 조회',
+    summary: '미분류 Event/Concept 목록 조회',
     description:
-      'CLASSIFIED_AS(active=true) 관계가 없는 Concept 목록을 반환합니다.',
+      'Event 단위로 반환하며, 미분류 mention만 포함합니다.',
   })
-  @ApiOkResponse({ type: [UnclassifiedConceptDto] })
+  @ApiOkResponse({ type: [UnclassifiedContextDto] })
   async getUnclassified(@Query() dto: UnclassifiedQueryDto) {
-    return this.adminService.getUnclassifiedConcepts(dto);
+    return this.adminService.getUnclassifiedContexts(dto);
   }
 
   @Post('runs')

@@ -26,6 +26,7 @@ export class OntologyAdminService {
   async getSnapshot() {
     const classesCypher = `
       MATCH (c:OClass)
+      WHERE c.taxonomyVersion = 'v2'
       RETURN {
         id: c.id,
         labelKo: c.labelKo,
@@ -41,6 +42,8 @@ export class OntologyAdminService {
 
     const edgesCypher = `
       MATCH (child:OClass)-[:OSUBCLASS_OF]->(parent:OClass)
+      WHERE child.taxonomyVersion = 'v2'
+        AND parent.taxonomyVersion = 'v2'
       RETURN { child: child.id, parent: parent.id } AS e
       ORDER BY child.id, parent.id
     `;
@@ -83,10 +86,7 @@ export class OntologyAdminService {
         MATCH (c)-[r:CLASSIFIED_AS]->(:OClass)
         WHERE coalesce(r.active, true) = true
       }
-      AND (
-        ($conceptType IS NOT NULL AND c.type = $conceptType)
-        OR ($conceptType IS NULL AND c.type <> 'Activity')
-      )
+      AND ($conceptType IS NULL OR c.type = $conceptType)
 
       OPTIONAL MATCH (e:Event)-[:MENTIONS]->(c)
       WHERE $since IS NULL OR e.startTime >= datetime($since)

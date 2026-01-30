@@ -82,7 +82,11 @@ export class OntologyAdminService {
   async getUnclassifiedContexts(
     dto: UnclassifiedQueryDto,
   ): Promise<UnclassifiedContextDto[]> {
-    const limit = dto.limit ?? 100;
+    const rawLimit = dto.limit ?? 100;
+    const limit =
+      typeof rawLimit === 'number' && Number.isFinite(rawLimit)
+        ? Math.trunc(rawLimit)
+        : 100;
     const minMentions = dto.minMentions ?? null;
     const since = dto.since ?? null;
 
@@ -118,7 +122,7 @@ export class OntologyAdminService {
         unclassifiedMentions: mentions
       } AS row
       ORDER BY e.startTime DESC
-      LIMIT $limit
+      LIMIT toInteger($limit)
     `;
 
     const res = await this.neo4j.run(cypher, {

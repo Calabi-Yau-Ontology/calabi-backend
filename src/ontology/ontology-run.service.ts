@@ -268,9 +268,13 @@ export class OntologyRunService {
            END AS o,
            missC, missO, wrongFacet, nonLeaf,
            CASE WHEN c IS NOT NULL AND o IS NOT NULL THEN 1 ELSE 0 END AS applied
-      FOREACH (_ IN CASE WHEN $replaceActive AND c IS NOT NULL AND o IS NOT NULL THEN [1] ELSE [] END |
-        MATCH (c)-[old:CLASSIFIED_AS]->(:OClass)
-        WHERE coalesce(old.active, true) = true
+      OPTIONAL MATCH (c)-[old:CLASSIFIED_AS]->(:OClass)
+      WHERE coalesce(old.active, true) = true
+      WITH row, c, o, missC, missO, wrongFacet, nonLeaf, applied, collect(old) AS activeRels
+      FOREACH (old IN CASE
+        WHEN $replaceActive AND c IS NOT NULL AND o IS NOT NULL THEN activeRels
+        ELSE []
+      END |
         SET old.active = false, old.updatedAt = datetime()
       )
       FOREACH (_ IN CASE WHEN c IS NOT NULL AND o IS NOT NULL THEN [1] ELSE [] END |
@@ -322,9 +326,13 @@ export class OntologyRunService {
            END AS o,
            missE, missO, wrongFacet, nonLeaf,
            CASE WHEN e IS NOT NULL AND o IS NOT NULL THEN 1 ELSE 0 END AS applied
-      FOREACH (_ IN CASE WHEN $replaceActive AND e IS NOT NULL AND o IS NOT NULL THEN [1] ELSE [] END |
-        MATCH (e)-[old:HAS_ACTIVITY]->(:OClass)
-        WHERE coalesce(old.active, true) = true
+      OPTIONAL MATCH (e)-[old:HAS_ACTIVITY]->(:OClass)
+      WHERE coalesce(old.active, true) = true
+      WITH row, e, o, missE, missO, wrongFacet, nonLeaf, applied, collect(old) AS activeRels
+      FOREACH (old IN CASE
+        WHEN $replaceActive AND e IS NOT NULL AND o IS NOT NULL THEN activeRels
+        ELSE []
+      END |
         SET old.active = false, old.updatedAt = datetime()
       )
       FOREACH (_ IN CASE WHEN e IS NOT NULL AND o IS NOT NULL THEN [1] ELSE [] END |

@@ -16,6 +16,7 @@ import { OntologyRunService } from './ontology-run.service';
 import { OntologyAdminService } from './ontology-admin.service';
 import { OntologyController } from './ontology.controller';
 import { OntologyAutoClassifyService } from './ontology-auto-classify.service';
+import { ClassificationRepository } from './classification.repository';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { OntologyAutoClassifyService } from './ontology-auto-classify.service';
     OntologyRunService,
     OntologyAdminService,
     OntologyAutoClassifyService,
+    ClassificationRepository,
   ],
   controllers: [OntologyController],
   exports: [OntologyService, ExpansionService],

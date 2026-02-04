@@ -6,6 +6,8 @@ import { firstValueFrom } from 'rxjs';
 import { Neo4jService } from 'src/neo4j/neo4j.service';
 import { ConceptType } from './constants/concept.types';
 import { OntologyAdminService } from './ontology-admin.service';
+import { ClassificationRepository } from './classification.repository';
+import { buildSnapshotPayload } from './snapshot.utils';
 
 type ClassifyConceptInput = {
   conceptKey: string;
@@ -59,6 +61,7 @@ export class OntologyAutoClassifyService {
     private readonly config: ConfigService,
     private readonly httpService: HttpService,
     private readonly adminService: OntologyAdminService,
+    private readonly classificationRepo: ClassificationRepository,
   ) {}
 
   async autoClassifyUnclassifiedConcepts(params: {
@@ -86,8 +89,8 @@ export class OntologyAutoClassifyService {
     }));
 
     const snapshot = await this.adminService.getSnapshot();
-    const entitySnapshot = this.buildSnapshotPayload(snapshot, ['Entity']);
-    const activitySnapshot = this.buildSnapshotPayload(snapshot, ['Activity']);
+    const entitySnapshot = buildSnapshotPayload(snapshot, ['Entity']);
+    const activitySnapshot = buildSnapshotPayload(snapshot, ['Activity']);
 
     const unclassified = inputs.length
       ? await this.filterUnclassifiedConcepts(inputs)
@@ -135,7 +138,7 @@ export class OntologyAutoClassifyService {
         for (const item of filtered) {
           const confidence = item.confidence ?? 0;
           if (!item.oClassId || confidence < threshold) continue;
-          await this.classifyConceptByOClass({
+          await this.classificationRepo.applyAutoConceptClassification({
             conceptName: item.conceptName,
             conceptType: item.conceptType,
             oClassId: item.oClassId,
@@ -217,7 +220,7 @@ export class OntologyAutoClassifyService {
     if (!title) return;
 
     const snapshot = params.snapshot ?? (await this.adminService.getSnapshot());
-    const filteredSnapshot = this.buildSnapshotPayload(snapshot, ['Activity']);
+    const filteredSnapshot = buildSnapshotPayload(snapshot, ['Activity']);
     if (!filteredSnapshot.oClasses.length) return;
 
     const payload: ClassifyRequestPayload = {
@@ -255,7 +258,7 @@ export class OntologyAutoClassifyService {
       const confidence = item.confidence ?? 0;
       if (item.eventId && item.eventId !== eventId) continue;
       if (!item.oClassId || confidence < threshold) continue;
-      await this.classifyEventByOClass({
+      await this.classificationRepo.applyAutoEventClassification({
         eventId,
         oClassId: item.oClassId,
         confidence,
@@ -265,59 +268,6 @@ export class OntologyAutoClassifyService {
       applied = true;
     }
     return applied;
-  }
-
-  private buildSnapshotPayload(
-    snapshot: any,
-    facets?: string[],
-  ): {
-    oClasses: any[];
-    subclassEdges: Array<{ childId: string; parentId: string }>;
-    seedVersion: string | null;
-  } {
-    const rawClasses = Array.isArray(snapshot?.oClasses) ? snapshot.oClasses : [];
-    const facetSet =
-      Array.isArray(facets) && facets.length
-        ? new Set(facets.map((facet) => this.normalizeFacet(facet)))
-        : null;
-    const filteredClasses = facetSet
-      ? rawClasses.filter((c) => {
-          const facet = this.normalizeFacet(c?.facet);
-          return facet && facetSet.has(facet);
-        })
-      : rawClasses;
-
-    const idSet = new Set(
-      filteredClasses.map((c) => c?.id).filter((id): id is string => !!id),
-    );
-
-    const rawEdges = Array.isArray(snapshot?.subclassEdges)
-      ? snapshot.subclassEdges
-      : [];
-    const subclassEdges = rawEdges
-      .map((edge: any) => ({
-        childId: edge.child ?? edge.childId,
-        parentId: edge.parent ?? edge.parentId,
-      }))
-      .filter(
-        (edge: any) => idSet.has(edge.childId) && idSet.has(edge.parentId),
-      );
-
-    const seedVersion = Array.isArray(snapshot?.seedVersions)
-      ? snapshot.seedVersions[0] ?? null
-      : snapshot?.seedVersions ?? snapshot?.seedVersion ?? null;
-
-    return {
-      oClasses: filteredClasses,
-      subclassEdges,
-      seedVersion,
-    };
-  }
-
-  private normalizeFacet(value: unknown): string | null {
-    if (typeof value !== 'string') return null;
-    const normalized = value.trim().toLowerCase();
-    return normalized.length ? normalized : null;
   }
 
   private async requestMlClassify(
@@ -369,107 +319,4 @@ export class OntologyAutoClassifyService {
     return new AxiosError(message);
   }
 
-  private async classifyConceptByOClass(params: {
-    conceptName: string;
-    conceptType: ConceptType;
-    oClassId: string;
-    confidence: number;
-    source: string;
-    reason: string | null;
-    expectedFacet: string | null;
-  }): Promise<void> {
-    const cypher = `
-      MATCH (c:Concept { name: $conceptName, type: $conceptType })
-      MATCH (o:OClass { id: $oClassId })
-      WHERE ($expectedFacet IS NULL OR o.facet = $expectedFacet)
-        AND NOT (o)<-[:OSUBCLASS_OF]-(:OClass)
-      OPTIONAL MATCH (c)-[r:CLASSIFIED_AS]->(:OClass)
-      WHERE coalesce(r.active, true) = true
-      WITH c, o, collect(r) AS activeRels
-      WITH c, o, activeRels,
-           [r IN activeRels WHERE coalesce(r.source, '') IN ['llm', 'auto']
-             AND coalesce(toFloat(r.confidence), -1) < $confidence] AS replaceable,
-           [r IN activeRels WHERE NOT (coalesce(r.source, '') IN ['llm', 'auto']
-             AND coalesce(toFloat(r.confidence), -1) < $confidence)] AS blocked
-      WITH c, o, activeRels, replaceable, blocked,
-           CASE
-             WHEN size(activeRels) = 0 THEN true
-             WHEN size(blocked) = 0 AND size(replaceable) > 0 THEN true
-             ELSE false
-           END AS allowReplace
-      FOREACH (_ IN CASE WHEN allowReplace AND size(replaceable) > 0 THEN [1] ELSE [] END |
-        FOREACH (old IN replaceable |
-          SET old.active = false, old.updatedAt = datetime()
-        )
-      )
-      FOREACH (_ IN CASE WHEN allowReplace THEN [1] ELSE [] END |
-        MERGE (c)-[rel:CLASSIFIED_AS]->(o)
-        ON CREATE SET rel.createdAt = datetime()
-        SET rel.updatedAt = datetime(),
-            rel.active = true,
-            rel.source = $source,
-            rel.confidence = $confidence,
-            rel.reason = $reason,
-            rel.decidedAt = datetime()
-      )
-    `;
-    try {
-      await this.neo4j.run(cypher, params);
-    } catch (err) {
-      this.logger.warn(
-        `Auto-classify failed for ${params.conceptType}::${params.conceptName} -> ${params.oClassId}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  }
-
-  private async classifyEventByOClass(params: {
-    eventId: string;
-    oClassId: string;
-    confidence: number;
-    source: string;
-    reason: string | null;
-  }): Promise<void> {
-    const cypher = `
-      MATCH (e:Event { eventId: $eventId })
-      MATCH (o:OClass { id: $oClassId })
-      WHERE o.facet = 'Activity'
-        AND NOT (o)<-[:OSUBCLASS_OF]-(:OClass)
-      OPTIONAL MATCH (e)-[r:HAS_ACTIVITY]->(:OClass)
-      WHERE coalesce(r.active, true) = true
-      WITH e, o, collect(r) AS activeRels
-      WITH e, o, activeRels,
-           [r IN activeRels WHERE coalesce(r.source, '') IN ['llm', 'auto']
-             AND coalesce(toFloat(r.confidence), -1) < $confidence] AS replaceable,
-           [r IN activeRels WHERE NOT (coalesce(r.source, '') IN ['llm', 'auto']
-             AND coalesce(toFloat(r.confidence), -1) < $confidence)] AS blocked
-      WITH e, o, activeRels, replaceable, blocked,
-           CASE
-             WHEN size(activeRels) = 0 THEN true
-             WHEN size(blocked) = 0 AND size(replaceable) > 0 THEN true
-             ELSE false
-           END AS allowReplace
-      FOREACH (_ IN CASE WHEN allowReplace AND size(replaceable) > 0 THEN [1] ELSE [] END |
-        FOREACH (old IN replaceable |
-          SET old.active = false, old.updatedAt = datetime()
-        )
-      )
-      FOREACH (_ IN CASE WHEN allowReplace THEN [1] ELSE [] END |
-        MERGE (e)-[rel:HAS_ACTIVITY]->(o)
-        ON CREATE SET rel.createdAt = datetime()
-        SET rel.updatedAt = datetime(),
-            rel.active = true,
-            rel.source = $source,
-            rel.confidence = $confidence,
-            rel.reason = $reason,
-            rel.decidedAt = datetime()
-      )
-    `;
-    try {
-      await this.neo4j.run(cypher, params);
-    } catch (err) {
-      this.logger.warn(
-        `Auto-classify failed for event ${params.eventId} -> ${params.oClassId}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-  }
 }

@@ -6,6 +6,7 @@ import { OntologyRunService } from './ontology-run.service';
 import { OntologyRun } from './entities/ontology-run.entity';
 import { ApplyOntologyRunDto } from './dto/apply-ontology-run.dto';
 import { Neo4jService } from 'src/neo4j/neo4j.service';
+import { ClassificationRepository } from './classification.repository';
 
 describe('OntologyRunService.applyRun', () => {
   let service: OntologyRunService;
@@ -36,6 +37,17 @@ describe('OntologyRunService.applyRun', () => {
           provide: Neo4jService,
           useValue: {
             withSession: jest.fn(),
+          },
+        },
+        {
+          provide: ClassificationRepository,
+          useValue: {
+            buildRunConceptClassificationCypher: jest
+              .fn()
+              .mockReturnValue('RETURN 1'),
+            buildRunEventClassificationCypher: jest
+              .fn()
+              .mockReturnValue('RETURN 1'),
           },
         },
       ],

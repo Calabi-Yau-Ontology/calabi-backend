@@ -8,6 +8,7 @@ import {
 } from './dto/ontology-snapshot.dto';
 import { UnclassifiedContextDto } from './dto/unclassified-context.dto';
 import { UnclassifiedQueryDto } from './dto/unclassified-query.dto';
+import { resolveSeedVersion } from './snapshot.utils';
 
 type OClassRow = {
   id: string;
@@ -62,14 +63,7 @@ export class OntologyAdminService {
       (r) => r.get('e') as OClassEdgeRow,
     );
 
-    const seedVersions = Array.from(
-      new Set(
-        oClasses
-          .map((c) => c.seedVersion)
-          .filter((v): v is string => typeof v === 'string' && v.length > 0),
-      ),
-    );
-    const seedVersion = seedVersions[0] ?? null;
+    const seedVersion = resolveSeedVersion({ oClasses });
 
     return {
       seedVersion,

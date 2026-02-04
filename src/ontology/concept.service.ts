@@ -24,7 +24,7 @@ export class ConceptService {
     if (!name) throw new Error('Concept name is empty');
 
     const cypher = `
-      MERGE (c:Concept { name: $name })
+      MERGE (c:Concept { name: $name, type: $type })
       ON CREATE SET
         c.id = randomUUID(),
         c.type = $type,
@@ -49,9 +49,9 @@ export class ConceptService {
     return result.records[0].get('concept');
   }
 
-  async getByName(name: string): Promise<ConceptNode | null> {
+  async getByName(name: string, type: ConceptType): Promise<ConceptNode | null> {
     const cypher = `
-      MATCH (c:Concept { name: $name })
+      MATCH (c:Concept { name: $name, type: $type })
       RETURN c {
         .id, .name, .type, .source,
         wikidataQid: c.wikidataQid,
@@ -59,30 +59,35 @@ export class ConceptService {
       } AS concept
       LIMIT 1
     `;
-    const res = await this.neo4j.run(cypher, { name: name.trim() });
+    const res = await this.neo4j.run(cypher, { name: name.trim(), type });
     return res.records.length ? res.records[0].get('concept') : null;
   }
 
   async markQidAndMaybeExpanded(params: {
     name: string;
+    type: ConceptType;
     qid: string;
     expanded: boolean;
   }): Promise<void> {
     const cypher = `
-      MATCH (c:Concept { name: $name })
+      MATCH (c:Concept { name: $name, type: $type })
       SET c.wikidataQid = $qid,
           c.updatedAt = datetime()
       ${params.expanded ? 'SET c.wikidataExpandedAt = datetime()' : ''}
     `;
-    await this.neo4j.run(cypher, { name: params.name.trim(), qid: params.qid });
+    await this.neo4j.run(cypher, {
+      name: params.name.trim(),
+      type: params.type,
+      qid: params.qid,
+    });
   }
 
-  async markExpanded(name: string): Promise<void> {
+  async markExpanded(name: string, type: ConceptType): Promise<void> {
     const cypher = `
-      MATCH (c:Concept { name: $name })
+      MATCH (c:Concept { name: $name, type: $type })
       SET c.wikidataExpandedAt = datetime(),
           c.updatedAt = datetime()
     `;
-    await this.neo4j.run(cypher, { name: name.trim() });
+    await this.neo4j.run(cypher, { name: name.trim(), type });
   }
 }
